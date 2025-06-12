@@ -72,6 +72,17 @@ function addEmoji(name) {
   return `${emojis[name] || ""} ${name}`;
 }
 
+function normalizeStockData(stockData) {
+  const transform = (arr) => arr.map((i) => ({ name: i.name, value: i.value }));
+  return {
+    gearStock: transform(stockData.gearStock),
+    seedsStock: transform(stockData.seedsStock),
+    eggStock: transform(stockData.eggStock),
+    honeyStock: transform(stockData.honeyStock),
+    cosmeticsStock: transform(stockData.cosmeticsStock),
+  };
+}
+
 async function fetchWithTimeout(url, options = {}, timeout = 5000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
@@ -84,9 +95,6 @@ async function fetchWithTimeout(url, options = {}, timeout = 5000) {
     throw error;
   }
 }
-
-const activeSessions = new Map();
-const lastSentCache = new Map();
 
 module.exports = {
   name: "gagstock",
@@ -124,41 +132,35 @@ module.exports = {
 
     await sendMessage(senderId, { text: "✅ Gagstock tracking started! You'll be notified when stock or weather changes." }, pageAccessToken);
 
+    const isFirstFetch = true;
+
     async function fetchAndNotify(alwaysSend = false) {
       try {
         const [stockRes, weatherRes] = await Promise.all([
-          fetchWithTimeout("https://vmi2625091.contaboserver.net/api/stocks"),
-          fetchWithTimeout("https://vmi2625091.contaboserver.net/api/weather"),
+          fetchWithTimeout("https://gagstock.gleeze.com/grow-a-garden"),
+          fetchWithTimeout("https://growagardenstock.com/api/stock/weather"),
         ]);
 
-        // Adapt to the new API response structure if necessary
-        // Assuming new API response structure similar to old:
-        // stockRes.data should contain keys like gear, seed, egg, cosmetics, honey each with items array
-        const stockDataRaw = stockRes.data;
-        const weatherDataRaw = weatherRes.data;
-
-        // Defensive checks and mapping as per expected structure:
+        const backup = stockRes.data.data;
         const stockData = {
-          gearStock: (stockDataRaw.gear?.items || []).map(i => ({ name: i.name, value: Number(i.quantity) })),
-          seedsStock: (stockDataRaw.seed?.items || []).map(i => ({ name: i.name, value: Number(i.quantity) })),
-          eggStock: (stockDataRaw.egg?.items || []).map(i => ({ name: i.name, value: Number(i.quantity) })),
-          cosmeticsStock: (stockDataRaw.cosmetics?.items || []).map(i => ({ name: i.name, value: Number(i.quantity) })),
-          honeyStock: (stockDataRaw.honey?.items || []).map(i => ({ name: i.name, value: Number(i.quantity) })),
+          gearStock: backup.gear.items.map(i => ({ name: i.name, value: Number(i.quantity) })),
+          seedsStock: backup.seed.items.map(i => ({ name: i.name, value: Number(i.quantity) })),
+          eggStock: backup.egg.items.map(i => ({ name: i.name, value: Number(i.quantity) })),
+          cosmeticsStock: backup.cosmetics.items.map(i => ({ name: i.name, value: Number(i.quantity) })),
+          honeyStock: backup.honey.items.map(i => ({ name: i.name, value: Number(i.quantity) })),
         };
 
-        // For weather adapt to expected keys or fallback defaults
         const weather = {
-          currentWeather: weatherDataRaw.currentWeather || "Unknown",
-          icon: weatherDataRaw.icon || "🌤️",
-          cropBonuses: weatherDataRaw.cropBonuses || "None",
-          updatedAt: weatherDataRaw.updatedAt || new Date().toISOString(),
+          currentWeather: weatherRes.data.currentWeather || "Unknown",
+          icon: weatherRes.data.icon || "🌤️",
+          cropBonuses: weatherRes.data.cropBonuses || "None",
+          updatedAt: weatherRes.data.updatedAt || new Date().toISOString(),
         };
 
         const restocks = getNextRestocks();
         const formatList = (arr) => arr.map(i => `- ${addEmoji(i.name)}: ${formatValue(i.value)}`).join("\n");
         const updatedAtPH = getPHTime().toLocaleString("en-PH", {
-          hour: "numeric", minute: "numeric", second: "numeric", hour12: true,
-          day: "2-digit", month: "short", year: "numeric"
+          hour: "numeric", minute: "numeric", second: "numeric", hour12: true, day: "2-digit", month: "short", year: "numeric"
         });
 
         let filteredContent = "";
