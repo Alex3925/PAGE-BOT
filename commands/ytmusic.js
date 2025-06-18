@@ -1,75 +1,61 @@
 const axios = require('axios');
-const { sendMessage } = require('../handles/sendMessage');
 const ytsr = require('@distube/ytsr');
+const { sendMessage } = require('../handles/sendMessage');
 
-const BASE_URL = 'https://snap-video3.p.rapidapi.com/download';
+const BASE = 'https://snap-video3.p.rapidapi.com/download';
+const KEYS = [
+  '28077613bemshd5a2d7ee4aea83ep17d768jsn7e4822c17d3c',
+  'f57934713bmsh0908331ee7d7995p1eb74bjsn58a1545c7d58'
+];
+
+let i = 0;
 
 module.exports = {
-    name: 'ytmusic',
-    description: 'Searches for songs on YouTube and provides audio links.',
-    usage: '-ytmusic <song name>',
-    author: 'coffee',
+  name: 'ytmusic',
+  description: 'Searches for songs on YouTube and provides audio links.',
+  usage: '-ytmusic <song name>',
+  author: 'coffee',
 
-    async execute(senderId, args, pageAccessToken) {
-        if (!args.length) return sendMessage(senderId, { text: 'Error: Please provide a song title.' }, pageAccessToken);
-        await searchSong(senderId, args.join(' '), pageAccessToken);
-    }
-};
+  async execute(id, args, token) {
+    if (!args[0]) return sendMessage(id, { text: 'Error: Please provide a song title.' }, token);
+    const s = (await ytsr(`${args.join(' ')}, official music video.`, { limit: 1 })).items[0];
+    if (!s) return sendMessage(id, { text: 'Error: Could not find song.' }, token);
 
-const searchSong = async (senderId, songName, pageAccessToken) => {
-    try {
-        // Search for the song using ytsr first
-        const song = (await ytsr(`${songName}, official music video.`, { limit: 1 })).items[0];
-        if (!song) return sendMessage(senderId, { text: 'Error: Could not find song.' }, pageAccessToken);
+    const p = new URLSearchParams({ url: s.url });
+    let d;
 
-        const encodedParams = new URLSearchParams();
-        encodedParams.set('url', song.url);
-
-        const options = {
-            method: 'POST',
-            url: BASE_URL,
-            headers: {
-                'x-rapidapi-key': '28077613bemshd5a2d7ee4aea83ep17d768jsn7e4822c17d3c',
-                'x-rapidapi-host': 'snap-video3.p.rapidapi.com',
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            data: encodedParams,
-        };
-
-        const { data } = await axios.request(options);
-
-        if (!data || !data.url || !data.medias) return sendMessage(senderId, { text: 'Error: Unable to retrieve song details.' }, pageAccessToken);
-
-        const { title, thumbnail, duration, medias } = data;
-
-        // Find the media with mp3 extension
-        const mp3Media = medias.find(media => media.extension === 'mp3');
-
-        // Send the song title, duration, and thumbnail in a template attachment
-        await sendMessage(senderId, {
-            attachment: {
-                type: "template",
-                payload: {
-                    template_type: "generic",
-                    elements: [{
-                        title: `🎧 Title: ${title}`,
-                        image_url: thumbnail,
-                        subtitle: `Duration: ${duration}`
-                    }]
-                }
-            }
-        }, pageAccessToken);
-
-        // Send the audio download link for the mp3 media
-        if (mp3Media) {
-            await sendMessage(senderId, {
-                attachment: { type: 'audio', payload: { url: mp3Media.url } }
-            }, pageAccessToken);
-        } else {
-            sendMessage(senderId, { text: 'Error: No mp3 file available for download.' }, pageAccessToken);
+    for (let j = 0; j < KEYS.length; j++) {
+      try {
+        const { data } = await axios.post(BASE, p, {
+          headers: {
+            'x-rapidapi-key': KEYS[(i + j) % KEYS.length],
+            'x-rapidapi-host': 'snap-video3.p.rapidapi.com',
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        });
+        if (data?.medias?.length) {
+          d = data;
+          i = (i + j + 1) % KEYS.length;
+          break;
         }
-    } catch (error) {
-        console.error('Error fetching music track:', error);
-        sendMessage(senderId, { text: 'Error: Unexpected error occurred.' }, pageAccessToken);
+      } catch {}
     }
+
+    if (!d) return sendMessage(id, { text: 'Error: All API keys have reached their usage limits.' }, token);
+    const m = d.medias.find(x => x.extension === 'mp3');
+
+    await sendMessage(id, {
+      attachment: {
+        type: 'template',
+        payload: {
+          template_type: 'generic',
+          elements: [{ title: `🎧 Title: ${d.title}`, image_url: d.thumbnail, subtitle: `Duration: ${d.duration}` }]
+        }
+      }
+    }, token);
+
+    sendMessage(id, {
+      attachment: m ? { type: 'audio', payload: { url: m.url } } : { text: 'Error: No mp3 file available.' }
+    }, token);
+  }
 };
