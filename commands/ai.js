@@ -1,7 +1,19 @@
 const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
 
-const GEMINI_API_KEY = 'AIzaSyAowq5pmdXV8GZ4xJrGKSgjsQQ3Ds48Dlg';
+const GEMINI_API_KEYS = [
+  'AIzaSyAowq5pmdXV8GZ4xJrGKSgjsQQ3Ds48Dlg',
+  'AIzaSyC5L5DkPyWRDhYfbM5BV1f5zDDYX5_vqfM',
+  'AIzaSyDuPD1wDOOPPfEJLo1xp2NGt74JzL7Wz_c',
+  'AIzaSyCCBHy1B1-vdGpiNCEYfwxkmVnPUviYd4U'
+];
+let keyIndex = 0;
+const getNextKey = () => {
+  const key = GEMINI_API_KEYS[keyIndex];
+  keyIndex = (keyIndex + 1) % GEMINI_API_KEYS.length;
+  return key;
+};
+
 const conversations = new Map();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -61,9 +73,11 @@ module.exports = {
     const history = conversations.get(senderId) || [];
     history.push({ role: 'user', parts: imagePart ? [{ text: prompt }, imagePart] : [{ text: prompt }] });
 
+    const apiKey = getNextKey();
+
     try {
       const { data } = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
         { contents: history, generationConfig: { responseMimeType: 'text/plain' } },
         { headers: { 'Content-Type': 'application/json' } }
       );
