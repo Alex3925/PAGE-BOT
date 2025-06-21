@@ -8,11 +8,6 @@ const GEMINI_API_KEYS = [
   'AIzaSyCCBHy1B1-vdGpiNCEYfwxkmVnPUviYd4U'
 ];
 let keyIndex = 0;
-const getNextKey = () => {
-  const key = GEMINI_API_KEYS[keyIndex];
-  keyIndex = (keyIndex + 1) % GEMINI_API_KEYS.length;
-  return key;
-};
 
 const conversations = new Map();
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -73,34 +68,45 @@ module.exports = {
     const history = conversations.get(senderId) || [];
     history.push({ role: 'user', parts: imagePart ? [{ text: prompt }, imagePart] : [{ text: prompt }] });
 
-    const apiKey = getNextKey();
+    let success = false;
+    let reply = null;
 
-    try {
-      const { data } = await axios.post(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-        { contents: history, generationConfig: { responseMimeType: 'text/plain' } },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+    for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
+      const keyToUse = GEMINI_API_KEYS[(keyIndex + i) % GEMINI_API_KEYS.length];
+      try {
+        const { data } = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${keyToUse}`,
+          { contents: history, generationConfig: { responseMimeType: 'text/plain' } },
+          { headers: { 'Content-Type': 'application/json' } }
+        );
 
-      let reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (!reply) return sendMessage(senderId, { text: 'No reply received.' }, token);
-
-      reply = formatParagraphs(formatBold(reply));
-      history.push({ role: 'model', parts: [{ text: reply }] });
-      conversations.set(senderId, history.slice(-20));
-
-      const prefix = '💬 | 𝙶𝚘𝚘𝚐𝚕𝚎 𝙶𝚎𝚖𝚒𝚗𝚒\n・───────────・\n';
-      const suffix = '\n・──── >ᴗ< ────・';
-      const chunks = reply.match(/[\s\S]{1,1900}/g);
-
-      for (let i = 0; i < chunks.length; i++) {
-        const part = (i === 0 ? prefix : '') + chunks[i] + (i === chunks.length - 1 ? suffix : '');
-        await sendMessage(senderId, { text: part }, token);
-        if (i < chunks.length - 1) await sleep(750);
+        reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (reply) {
+          keyIndex = (keyIndex + i) % GEMINI_API_KEYS.length; // update global index
+          success = true;
+          break;
+        }
+      } catch (err) {
+        console.warn(`API key failed (${keyToUse}):`, err?.response?.data?.error?.message || err.message);
       }
-    } catch (err) {
-      console.error('Gemini error:', err?.response?.data || err.message);
-      sendMessage(senderId, { text: '❎ | Gemini Flash error.' }, token);
+    }
+
+    if (!success || !reply) {
+      return sendMessage(senderId, { text: '❎ | All API keys failed. Please try again later.' }, token);
+    }
+
+    reply = formatParagraphs(formatBold(reply));
+    history.push({ role: 'model', parts: [{ text: reply }] });
+    conversations.set(senderId, history.slice(-20));
+
+    const prefix = '💬 | 𝙶𝚘𝚘𝚐𝚕𝚎 𝙶𝚎𝚖𝚒𝚗𝚒\n・───────────・\n';
+    const suffix = '\n・──── >ᴗ< ────・';
+    const chunks = reply.match(/[\s\S]{1,1900}/g);
+
+    for (let i = 0; i < chunks.length; i++) {
+      const part = (i === 0 ? prefix : '') + chunks[i] + (i === chunks.length - 1 ? suffix : '');
+      await sendMessage(senderId, { text: part }, token);
+      if (i < chunks.length - 1) await sleep(750);
     }
   }
 };
