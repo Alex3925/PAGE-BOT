@@ -4,8 +4,9 @@ const { sendMessage } = require('../handles/sendMessage');
 
 const BASE = 'https://snap-video3.p.rapidapi.com/download';
 const KEYS = [
-  '28077613bemshd5a2d7ee4aea83ep17d768jsn7e4822c17d3c',
-  'f57934713bmsh0908331ee7d7995p1eb74bjsn58a1545c7d58'
+'28077613bemshd5a2d7ee4aea83ep17d768jsn7e4822c17d3c',
+'f57934713bmsh0908331ee7d7995p1eb74bjsn58a1545c7d58',
+'6131df06aamshe289c9c992619d8p1a7ec3jsnfcd815bbe8d7'
 ];
 
 let i = 0;
