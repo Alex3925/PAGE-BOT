@@ -24,13 +24,13 @@ function getNextRestocks() {
   const now = getPHTime();
   const timers = {};
 
-  // Dealer stock: every 4 hours (e.g., 00:00, 04:00, 08:00, ...)
+  // Dealer stock (normalStock): every 4 hours (e.g., 00:00, 04:00, 08:00, ...)
   const dealerNext = new Date(now);
   const dealerHours = Math.ceil(now.getHours() / 4) * 4;
   dealerNext.setHours(dealerHours, 0, 0, 0);
   timers.dealer = getCountdown(dealerNext);
 
-  // Advanced Dealer stock: every 2 hours (e.g., 00:00, 02:00, 04:00, ...)
+  // Advanced Dealer stock (mirageStock): every 2 hours (e.g., 00:00, 02:00, 04:00, ...)
   const advDealerNext = new Date(now);
   const advDealerHours = Math.ceil(now.getHours() / 2) * 2;
   advDealerNext.setHours(advDealerHours, 0, 0, 0);
@@ -57,7 +57,7 @@ function addEmoji(name) {
     "Spider": "🕷️", "Sound": "🎶", "Phoenix": "🦣", "Portal": "🌀", "Rumble": "⚡",
     "Pain": "😣", "Blizzard": "❄️", "Gravity": "🌌", "Mammoth": "🦣", "T-Rex": "🦖",
     "Dough": "🍩", "Shadow": "👤", "Venom": "🐍", "Control": "🎮", "Spirit": "🐉",
-    "Dragon": "🦁", "Leopard": "🐆", "Kitsune": "🦊"
+    "Dragon": "🦁", "Leopard": "🐆", "Kitsune": "🦊", "Bomb": "💣", "Blade": "🗡️", "Eagle": "🦅"
   };
   return `${emojis[name] || "🍎"} ${name}`;
 }
@@ -122,10 +122,9 @@ module.exports = {
         };
 
         const stockRes = await fetchWithTimeout(options.url, { headers: options.headers });
-        // Assuming API returns { dealer: [{ name, stock }], advancedDealer: [{ name, stock }] }
         const stockData = {
-          dealer: stockRes.data.dealer || [],
-          advancedDealer: stockRes.data.advancedDealer || [],
+          dealer: (stockRes.data.normalStock || []).map(name => ({ name, stock: 1 })),
+          advancedDealer: (stockRes.data.mirageStock || []).map(name => ({ name, stock: 1 })),
         };
 
         const restocks = getNextRestocks();
@@ -143,12 +142,12 @@ module.exports = {
             : items;
           if (filtered.length) matched += filtered.length;
           return filtered
-            .map(item => `- ${addEmoji(item.name)} ${item.name}: x${item.stock}`)
+            .map(item => `- ${addEmoji(item.name)} ${item.name}: In Stock`)
             .join("\n") || "No matching stock.";
         };
 
-        messageContent += `🛒 𝗗𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸:\n${formatStock(stockData.dealer)}\n⏳ Next Restock: ${restocks.dealer}\n\n`;
-        messageContent += `🏪 𝗔𝗱𝘃𝗮𝗻𝗰𝗲𝗱 �_D𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸:\n${formatStock(stockData.advancedDealer)}\n⏳ Next Restock: ${restocks.advDealer}\n\n`;
+        messageContent += `🛒 𝗗𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸 (Every 4h):\n${formatStock(stockData.dealer)}\n⏳ Next Restock: ${restocks.dealer}\n\n`;
+        messageContent += `🏪 𝗔𝗱𝘃𝗮𝗻𝗰𝗲𝗱 𝗗𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸 (Every 2h):\n${formatStock(stockData.advancedDealer)}\n⏳ Next Restock: ${restocks.advDealer}\n\n`;
 
         // Skip if no matching items and filters are applied
         if (filters.length && matched === 0) return false;
@@ -159,7 +158,7 @@ module.exports = {
         if (!alwaysSend && lastSent === currentKey) return false;
         lastSentCache.set(senderId, currentKey);
 
-        const message = `🍎 𝗕𝗹𝗼𝘅 𝗙𝗿𝘂𝗶𝘁𝘀 — 𝗦𝘁𝗼𝗰𝗸 𝗧𝗿𝗮𝗰𝗸𝗲𝗿\n\n${messageContent}📅 Updated at (Philippines): ${updatedAtPH}`;
+        const message = `🍎 𝗕𝗹𝗼𝘅 𝗙𝗿𝘂𝗶𝘁𝘀 — 𝗦𝘁𝗼𝗰𝗸 𝗧�_r𝗮𝗰𝗸𝗲𝗿\n\n${messageContent}📅 Updated at (Philippines): ${updatedAtPH}`;
 
         await sendMessage(senderId, { text: message }, pageAccessToken);
         return true;
