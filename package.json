@@ -21,11 +21,12 @@
     "hercai": "^14.0.3",
     "llyrics": "^1.1.7",
     "node-fetch": "^3.3.2",
+    "punycode": "^2.3.1",
     "request": "^2.88.2",
     "tempmail.lol": "^4.4.0",
     "winston": "^3.13.0"
   },
-"engines": {
-  "node": ">=20"
-}
+  "engines": {
+    "node": ">=20"
+  }
 }
