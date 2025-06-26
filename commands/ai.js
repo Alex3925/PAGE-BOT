@@ -20,9 +20,7 @@ const boldMap = Object.fromEntries(
 );
 
 const formatBold = text =>
-  text
-    .replace(/^\s*[\*\-•]+\s*\n(?=\s*\*\*)/gm, '') 
-    .replace(/(^|\s)\*\*(.+?)\*\*(?=\s|$)/g, (_, s, w) => `${s}\n${[...w].map(c => boldMap[c] || c).join('')}`);
+  text.replace(/(^|\s)\*\*(.+?)\*\*(?=\s|$)/g, (_, s, w) => `${s}\n${[...w].map(c => boldMap[c] || c).join('')}`);
 
 const formatParagraphs = text =>
   text.replace(/([.!?])(\s+)(?=[A-Z])/g, '$1\n\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -41,6 +39,46 @@ const getImageUrl = async (e, token) => {
   }
 };
 
+const buildImagePart = async (url) => {
+  try {
+    const { data, headers } = await axios.get(url, { responseType: 'arraybuffer' });
+    return {
+      inline_data: {
+        mimeType: headers['content-type'],
+        data: Buffer.from(data).toString('base64')
+      }
+    };
+  } catch {
+    return null;
+  }
+};
+
+const tryAllKeysTwice = async (contents) => {
+  const total = GEMINI_API_KEYS.length;
+
+  for (let round = 1; round <= 2; round++) {
+    for (let i = 0; i < total; i++) {
+      const currentKey = GEMINI_API_KEYS[(keyIndex + i) % total];
+      try {
+        const { data } = await axios.post(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${currentKey}`,
+          { contents, generationConfig: { responseMimeType: 'text/plain' } },
+          { headers: { 'Content-Type': 'application/json' } }
+        );
+        const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+        if (reply) {
+          keyIndex = (keyIndex + i) % total; // Set new working key
+          return { success: true, reply };
+        }
+      } catch (err) {
+        console.warn(`❌ Round ${round}, key failed (${currentKey}):`, err?.response?.data?.error?.message || err.message);
+      }
+    }
+  }
+
+  return { success: false };
+};
+
 module.exports = {
   name: 'ai',
   description: 'Interact with Google Gemini.',
@@ -51,57 +89,31 @@ module.exports = {
     const prompt = args.join(' ').trim();
     if (!prompt) return sendMessage(senderId, { text: 'Ask me something!' }, token);
 
-    let url = await getImageUrl(event, token);
+    let imageUrl = await getImageUrl(event, token);
     const cached = imageCache?.get(senderId);
-    if (!url && cached && Date.now() - cached.timestamp <= 300000) url = cached.url;
+    if (!imageUrl && cached && Date.now() - cached.timestamp <= 300000) imageUrl = cached.url;
 
     let imagePart = null;
-    if (url) {
-      try {
-        const { data, headers } = await axios.get(url, { responseType: 'arraybuffer' });
-        imagePart = { inline_data: { mimeType: headers['content-type'], data: Buffer.from(data).toString('base64') } };
-      } catch {
-        return sendMessage(senderId, { text: '❎ | Failed to process the image.' }, token);
-      }
+    if (imageUrl) {
+      imagePart = await buildImagePart(imageUrl);
+      if (!imagePart) return sendMessage(senderId, { text: '❎ | Failed to process the image.' }, token);
     }
 
     const history = conversations.get(senderId) || [];
     history.push({ role: 'user', parts: imagePart ? [{ text: prompt }, imagePart] : [{ text: prompt }] });
 
-    let success = false;
-    let reply = null;
-
-    for (let i = 0; i < GEMINI_API_KEYS.length; i++) {
-      const keyToUse = GEMINI_API_KEYS[(keyIndex + i) % GEMINI_API_KEYS.length];
-      try {
-        const { data } = await axios.post(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${keyToUse}`,
-          { contents: history, generationConfig: { responseMimeType: 'text/plain' } },
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-
-        reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-        if (reply) {
-          keyIndex = (keyIndex + i) % GEMINI_API_KEYS.length; // update global index
-          success = true;
-          break;
-        }
-      } catch (err) {
-        console.warn(`API key failed (${keyToUse}):`, err?.response?.data?.error?.message || err.message);
-      }
-    }
-
+    const { reply, success } = await tryAllKeysTwice(history);
     if (!success || !reply) {
-      return sendMessage(senderId, { text: '❎ | All API keys failed. Please try again later.' }, token);
+      return sendMessage(senderId, { text: '❎ | All API keys failed after two rounds. Please try again later.' }, token);
     }
 
-    reply = formatParagraphs(formatBold(reply));
-    history.push({ role: 'model', parts: [{ text: reply }] });
+    const formatted = formatParagraphs(formatBold(reply));
+    history.push({ role: 'model', parts: [{ text: formatted }] });
     conversations.set(senderId, history.slice(-20));
 
     const prefix = '💬 | 𝙶𝚘𝚘𝚐𝚕𝚎 𝙶𝚎𝚖𝚒𝚗𝚒\n・───────────・\n';
     const suffix = '\n・──── >ᴗ< ────・';
-    const chunks = reply.match(/[\s\S]{1,1900}/g);
+    const chunks = formatted.match(/[\s\S]{1,1900}/g);
 
     for (let i = 0; i < chunks.length; i++) {
       const part = (i === 0 ? prefix : '') + chunks[i] + (i === chunks.length - 1 ? suffix : '');
