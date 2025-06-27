@@ -22,7 +22,7 @@ module.exports = {
         headers: {
           'user-agent': 'Mozilla/5.0 (Android)', 'content-type': 'application/json',
           origin: 'https://www.blackbox.ai', referer: 'https://www.blackbox.ai/',
-          cookie: 'sessionId=5af10606-480c-4ea3-8a79-242cb9380cec'
+          cookie: 'sessionId=336f68f2-86a9-4653-a5b5-b26e4c5f04d1'
         }
       });
 
