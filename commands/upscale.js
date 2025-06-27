@@ -9,7 +9,7 @@ const getImageUrl = async (event, token) => {
   if (!mid) return null;
 
   try {
-    const { data } = await axios.get(`https://graph.facebook.com/v22.0/${mid}/attachments`, {
+    const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token }
     });
 
@@ -88,7 +88,7 @@ module.exports = {
       fbForm.append('filedata', fs.createReadStream(tmpOutput));
 
       const uploadRes = await axios.post(
-        `https://graph.facebook.com/v22.0/me/message_attachments?access_token=${pageAccessToken}`,
+        `https://graph.facebook.com/v23.0/me/message_attachments?access_token=${pageAccessToken}`,
         fbForm,
         { headers: fbForm.getHeaders() }
       );
@@ -96,7 +96,7 @@ module.exports = {
       const attachmentId = uploadRes.data.attachment_id;
 
       await axios.post(
-        `https://graph.facebook.com/v22.0/me/messages?access_token=${pageAccessToken}`,
+        `https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`,
         {
           recipient: { id: senderId },
           message: {
