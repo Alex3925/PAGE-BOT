@@ -2,6 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
+const commandCategories = {
+  "📖 | 𝙴𝚍𝚞𝚌𝚊𝚝𝚒𝚘𝚗": ['ai'],
+  "🖼 | 𝙸𝚖𝚊𝚐𝚎": ['imagegen', 'pinterest', 'removebg', 'upscale'],
+  "🎧 | 𝙼𝚞𝚜𝚒𝚌": ['lyrics', 'ytmusic'],
+  "👥 | 𝙾𝚝𝚑𝚎𝚛𝚜": ['alldl', 'help', 'tempmail']
+};
+
 module.exports = {
   name: 'help',
   description: 'Show available commands',
@@ -20,40 +27,47 @@ module.exports = {
       }
     };
 
+    // If user asked for specific command
     if (args.length) {
       const name = args[0].toLowerCase();
       const command = commandFiles.map(loadCommand).find(c => c?.name.toLowerCase() === name);
 
       return sendMessage(
         senderId,
-        { text: command
-          ? `━━━━━━━━━━━━━━
+        {
+          text: command
+            ? `━━━━━━━━━━━━━━
 𝙲𝚘𝚖𝚖𝚊𝚗𝚍 𝙽𝚊𝚖𝚎: ${command.name}
 𝙳𝚎𝚜𝚌𝚛𝚒𝚙𝚝𝚒𝚘𝚗: ${command.description}
 𝚄𝚜𝚊𝚐𝚎: ${command.usage}
 ━━━━━━━━━━━━━━`
-          : `Command "${name}" not found.` },
+            : `Command "${name}" not found.`
+        },
         pageAccessToken
       );
     }
 
-    const commandsList = commandFiles
-      .map(loadCommand)
-      .filter(c => c && c.name !== 'test')
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map(c => `│ - ${c.name}`)
+    // Grouped help message by categories
+    const categorizedMessage = Object.entries(commandCategories)
+      .map(([category, commands]) => {
+        const listed = commands
+          .filter(cmd => commandFiles.includes(`${cmd}.js`))
+          .map(cmd => `│ - ${cmd}`)
+          .join('\n');
+        return `╭─╼━━━━━━━━╾─╮\n│ ${category}\n${listed}\n╰─━━━━━━━━━╾─╯`;
+      })
       .join('\n');
 
     sendMessage(
       senderId,
-      { text: `━━━━━━━━━━━━━━
+      {
+        text: `━━━━━━━━━━━━━━
 𝙰𝚟𝚊𝚒𝚕𝚊𝚋𝚕𝚎 𝙲𝚘𝚖𝚖𝚊𝚗𝚍𝚜:
-╭─╼━━━━━━━━╾─╮
-${commandsList}
-╰─━━━━━━━━━╾─╯
-Chat -help [name] 
+${categorizedMessage}
+Chat -help [name]   
 to see command details.
-━━━━━━━━━━━━━━` },
+━━━━━━━━━━━━━━`
+      },
       pageAccessToken
     );
   }
