@@ -79,7 +79,8 @@ module.exports = {
   name: "bloxfruits",
   description: "Track Blox Fruits Dealer and Advanced Dealer stock and restocks.",
   usage: "bloxfruit on | bloxfruit on Dragon | Kitsune | bloxfruit off",
-  category: "Tools ⚒️",
+  author: "Alex Jhon Ponce"
+  category: "Automation Tools ⚒️",
 
   async execute(senderId, args, pageAccessToken) {
     const action = args[0]?.toLowerCase();
@@ -104,7 +105,7 @@ module.exports = {
 
     if (activeSessions.has(senderId)) {
       return await sendMessage(senderId, {
-        text: "📡 You're already tracking Blox Fruits. Use 'bloxfruit off' to stop.",
+        text: "📡 You're already tracking Blox Fruits Stock. Use 'bloxfruit off' to stop.",
       }, pageAccessToken);
     }
 
@@ -146,8 +147,8 @@ module.exports = {
             .join("\n") || "No matching stock.";
         };
 
-        messageContent += `🛒 𝗗𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸 (Every 4h):\n${formatStock(stockData.dealer)}\n⏳ Next Restock: ${restocks.dealer}\n\n`;
-        messageContent += `🏪 𝗔𝗱𝘃𝗮𝗻𝗰𝗲𝗱 𝗗𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸 (Every 2h):\n${formatStock(stockData.advancedDealer)}\n⏳ Next Restock: ${restocks.advDealer}\n\n`;
+        messageContent += `🛒 𝗗𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸:\n${formatStock(stockData.dealer)}\n⏳ Next Restock: ${restocks.dealer}\n\n`;
+        messageContent += `🏪 𝗔𝗱𝘃𝗮𝗻𝗰𝗲𝗱 𝗗𝗲𝗮𝗹𝗲𝗿 𝗦𝘁𝗼𝗰𝗸:\n${formatStock(stockData.advancedDealer)}\n⏳ Next Restock: ${restocks.advDealer}\n\n`;
 
         // Skip if no matching items and filters are applied
         if (filters.length && matched === 0) return false;
@@ -158,7 +159,7 @@ module.exports = {
         if (!alwaysSend && lastSent === currentKey) return false;
         lastSentCache.set(senderId, currentKey);
 
-        const message = `🍎 𝗕𝗹𝗼𝘅 𝗙𝗿𝘂𝗶𝘁𝘀 — 𝗦𝘁𝗼𝗰𝗸 𝗧�_r𝗮𝗰𝗸𝗲𝗿\n\n${messageContent}📅 Updated at (Philippines): ${updatedAtPH}`;
+        const message = `🍎 𝗕𝗹𝗼𝘅 𝗙𝗿𝘂𝗶𝘁𝘀 — 𝗦𝘁𝗼𝗰𝗸 𝗧r𝗮𝗰𝗸𝗲𝗿\n\n${messageContent}📅 Updated at (Philippines): ${updatedAtPH}`;
 
         await sendMessage(senderId, { text: message }, pageAccessToken);
         return true;
