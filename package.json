@@ -24,7 +24,6 @@
     "punycode": "^2.3.1",
     "request": "^2.88.2",
     "tempmail.lol": "^4.4.0",
-    "unlimited-ai": "^6.1.0",
     "winston": "^3.13.0"
   },
   "engines": {
