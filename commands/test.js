@@ -1,74 +1,115 @@
-const fs = require('fs');
-const path = require('path');
+const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
 
-const commandCategories = {
-  "📖 | 𝙴𝚍𝚞𝚌𝚊𝚝𝚒𝚘𝚗": ['ai'],
-  "🖼 | 𝙸𝚖𝚊𝚐𝚎": ['imagegen', 'pinterest', 'removebg', 'upscale'],
-  "🎧 | 𝙼𝚞𝚜𝚒𝚌": ['lyrics', 'ytmusic'],
-  "👥 | 𝙾𝚝𝚑𝚎𝚛𝚜": ['alldl', 'help', 'tempmail']
+const atob = str => Buffer.from(str, 'base64').toString('utf-8');
+const GROQ_API_KEY = atob('Z3NrX0hxMGJ5MFI4ajZ2eTR4SmIzVVdEV0dkeWIzRll0WklZNXhwZ2NoeVJKQ0JVQldXRjA3RFM=');
+
+const conversations = new Map();
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const getImageUrl = async (event, token) => {
+  const mid = event?.message?.reply_to?.mid || event?.message?.mid;
+  if (!mid) return null;
+  try {
+    const { data } = await axios.get(
+      `https://graph.facebook.com/v23.0/${mid}/attachments`,
+      { params: { access_token: token } }
+    );
+    return data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url;
+  } catch (e) {
+    console.error('Image fetch error:', e?.response?.data || e.message);
+    return null;
+  }
+};
+
+const buildImageBlock = async (url) => {
+  try {
+    const { data, headers } = await axios.get(url, { responseType: 'arraybuffer' });
+    const mime = headers['content-type'];
+    const base64 = Buffer.from(data).toString('base64');
+    return {
+      type: 'image_url',
+      image_url: { url: `data:${mime};base64,${base64}` }
+    };
+  } catch (e) {
+    console.error('Image conversion error:', e.message);
+    return null;
+  }
+};
+
+const sendToGroq = async (messages) => {
+  try {
+    const { data } = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'llama-3.3-70b-versatile',
+        messages,
+        temperature: 0.7
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    const reply = data.choices?.[0]?.message?.content?.trim();
+    return reply ? { success: true, reply } : { success: false };
+  } catch (e) {
+    console.warn('Groq API error:', e?.response?.data || e.message);
+    return { success: false };
+  }
 };
 
 module.exports = {
-  name: 'test',
-  description: 'Show available commands',
-  usage: 'help\nhelp [command name]',
-  author: 'System',
+  name: 'groq',
+  description: 'Chat with Groq using llama‑3.3‑70b‑versatile (June 2025)',
+  usage: 'groq [prompt]',
+  author: 'coffee',
 
-  execute(senderId, args, pageAccessToken) {
-    const commandsDir = path.join(__dirname, '../commands');
-    const commandFiles = fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'));
+  async execute(senderId, args, token, event, sendMessage, imageCache) {
+    const prompt = args.join(' ').trim();
+    if (!prompt) return sendMessage(senderId, { text: '❓ Please enter your question.' }, token);
 
-    const loadCommand = file => {
-      try {
-        return require(path.join(commandsDir, file));
-      } catch {
-        return null;
-      }
-    };
-
-    // If user asked for specific command
-    if (args.length) {
-      const name = args[0].toLowerCase();
-      const command = commandFiles.map(loadCommand).find(c => c?.name.toLowerCase() === name);
-
-      return sendMessage(
-        senderId,
-        {
-          text: command
-            ? `━━━━━━━━━━━━━━
-𝙲𝚘𝚖𝚖𝚊𝚗𝚍 𝙽𝚊𝚖𝚎: ${command.name}
-𝙳𝚎𝚜𝚌𝚛𝚒𝚙𝚝𝚒𝚘𝚗: ${command.description}
-𝚄𝚜𝚊𝚐𝚎: ${command.usage}
-━━━━━━━━━━━━━━`
-            : `Command "${name}" not found.`
-        },
-        pageAccessToken
-      );
+    let imageUrl = await getImageUrl(event, token);
+    const cached = imageCache?.get(senderId);
+    if (!imageUrl && cached && Date.now() - cached.timestamp < 300000) {
+      imageUrl = cached.url;
+    }
+    if (imageUrl) {
+      imageCache?.set(senderId, { url: imageUrl, timestamp: Date.now() });
     }
 
-    // Grouped help message by categories
-    const categorizedMessage = Object.entries(commandCategories)
-      .map(([category, commands]) => {
-        const listed = commands
-          .filter(cmd => commandFiles.includes(`${cmd}.js`))
-          .map(cmd => `│ - ${cmd}`)
-          .join('\n');
-        return `╭─╼━━━━━━━━╾─╮\n│ ${category}\n${listed}\n╰─━━━━━━━━━╾─╯`;
-      })
-      .join('\n');
+    const userMessage = { role: 'user', content: [] };
+    userMessage.content.push({ type: 'text', text: prompt });
 
-    sendMessage(
-      senderId,
-      {
-        text: `━━━━━━━━━━━━━━
-𝙰𝚟𝚊𝚒𝚕𝚊𝚋𝚕𝚎 𝙲𝚘𝚖𝚖𝚊𝚗𝚍𝚜:
-${categorizedMessage}
-Chat -help [name]   
-to see command details.
-━━━━━━━━━━━━━━`
-      },
-      pageAccessToken
-    );
+    if (imageUrl) {
+      const imagePart = await buildImageBlock(imageUrl);
+      if (!imagePart) {
+        return sendMessage(senderId, { text: '❎ Failed to process the image.' }, token);
+      }
+      userMessage.content.push(imagePart);
+    }
+
+    const history = conversations.get(senderId) || [];
+    history.push(userMessage);
+
+    const { success, reply } = await sendToGroq(history);
+    if (!success) {
+      return sendMessage(senderId, { text: '❌ Groq API failed. Please try again later.' }, token);
+    }
+
+    history.push({ role: 'assistant', content: reply });
+    conversations.set(senderId, history.slice(-20));
+
+    const chunks = reply.match(/[\s\S]{1,1900}/g);
+    const prefix = '💬 | 𝙶𝚛𝚘𝚚 𝙻𝙻𝙼 (𝐋𝐋𝐀𝐌𝐀 𝟑.𝟑)\n・───────────・\n';
+    const suffix = '\n・──── >ᴗ< ────・';
+
+    for (let i = 0; i < chunks.length; i++) {
+      const text = (i === 0 ? prefix : '') + chunks[i] + (i === chunks.length - 1 ? suffix : '');
+      await sendMessage(senderId, { text }, token);
+      if (i < chunks.length - 1) await sleep(750);
+    }
   }
 };
