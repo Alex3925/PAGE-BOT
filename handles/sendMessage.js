@@ -1,9 +1,18 @@
 const axios = require('axios');
+const https = require('https');
 const path = require('path');
+
+// Force IPv4 to avoid IPv6 timeout issues on Railway
+const agent = new https.Agent({ family: 4 });
 
 // Helper function for POST requests
 const axiosPost = (url, data, params = {}) =>
-  axios.post(url, data, { params }).then(res => res.data);
+  axios
+    .post(url, data, {
+      params,
+      httpsAgent: agent,
+    })
+    .then(res => res.data);
 
 // Send a message with typing indicators
 const sendMessage = async (senderId, { text = '', attachment = null }, pageAccessToken) => {
@@ -43,7 +52,7 @@ const sendMessage = async (senderId, { text = '', attachment = null }, pageAcces
       }
     }
 
-    // Log outgoing message for debug
+    // Log outgoing message
     console.log('📤 Sending payload:', JSON.stringify(messagePayload, null, 2));
 
     // Send the message
