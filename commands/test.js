@@ -1,5 +1,3 @@
-test command.
-
 const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
