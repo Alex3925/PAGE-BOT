@@ -1,61 +1,74 @@
-const ai = require('unlimited-ai');
+const fs = require('fs');
+const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
-const MODELS = [
-  "gpt-4o-mini", "gpt-4o-free", "gpt-4-turbo-2024-04-09",
-  "gpt-4o-2024-08-06", "grok-2", "grok-2-mini", "claude-3-opus-20240229",
-  "claude-3-opus-20240229-gcp", "claude-3-sonnet-20240229", "claude-3-5-sonnet-20240620",
-  "claude-3-haiku-20240307", "claude-2.1", "gemini-1.5-flash-exp-0827", "gemini-1.5-pro-exp-0827"
-];
-
-const historyLimit = 20;
-
-const splitMessage = (msg, max = 1900) => {
-  let chunks = [];
-  for (let i = 0; i < msg.length; i += max) {
-    chunks.push(msg.slice(i, i + max));
-  }
-  return chunks;
+const commandCategories = {
+  "📖 | 𝙴𝚍𝚞𝚌𝚊𝚝𝚒𝚘𝚗": ['ai'],
+  "🖼 | 𝙸𝚖𝚊𝚐𝚎": ['imagegen', 'pinterest', 'removebg', 'upscale'],
+  "🎧 | 𝙼𝚞𝚜𝚒𝚌": ['lyrics', 'ytmusic'],
+  "👥 | 𝙾𝚝𝚑𝚎𝚛𝚜": ['alldl', 'help', 'tempmail']
 };
-
-const sendChunks = async (id, msg, token) => {
-  const chunks = splitMessage(msg);
-  for (const chunk of chunks) {
-    await sendMessage(id, { text: chunk }, token);
-  }
-};
-
-let userConversations = {};
 
 module.exports = {
-  name: 'test',
-  description: 'Interact with OpenAIs ChatGPT',
-  usage: '-chatgpt <question>',
-  author: 'Coffee',
+  name: 'help',
+  description: 'Show available commands',
+  usage: 'help\nhelp [command name]',
+  author: 'System',
 
-  async execute(id, args, token) {
-    const prompt = args.join(' ') || 'hi';
+  execute(senderId, args, pageAccessToken) {
+    const commandsDir = path.join(__dirname, '../commands');
+    const commandFiles = fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'));
 
-    if (prompt.toLowerCase() === 'models') {
-      await sendChunks(id, `Available Models:\n${MODELS.join(', ')}`, token);
-      return;
-    }
-
-    userConversations[id] = (userConversations[id] || []).concat(`User: ${prompt}`).slice(-historyLimit);
-    const history = `${userConversations[id].join('\n')}\nAI:`;
-
-    for (const model of MODELS) {
+    const loadCommand = file => {
       try {
-        const response = await ai.generate(model, [{ role: 'user', content: history }]);
-        const reply = response.trim();
-        userConversations[id].push(`AI: ${reply}`);
-        await sendChunks(id, reply, token);
-        return;
+        return require(path.join(commandsDir, file));
       } catch {
-        continue;
+        return null;
       }
+    };
+
+    // If user asked for specific command
+    if (args.length) {
+      const name = args[0].toLowerCase();
+      const command = commandFiles.map(loadCommand).find(c => c?.name.toLowerCase() === name);
+
+      return sendMessage(
+        senderId,
+        {
+          text: command
+            ? `━━━━━━━━━━━━━━
+𝙲𝚘𝚖𝚖𝚊𝚗𝚍 𝙽𝚊𝚖𝚎: ${command.name}
+𝙳𝚎𝚜𝚌𝚛𝚒𝚙𝚝𝚒𝚘𝚗: ${command.description}
+𝚄𝚜𝚊𝚐𝚎: ${command.usage}
+━━━━━━━━━━━━━━`
+            : `Command "${name}" not found.`
+        },
+        pageAccessToken
+      );
     }
 
-    await sendMessage(id, { text: `Error: All models failed to respond.` }, token);
+    // Grouped help message by categories
+    const categorizedMessage = Object.entries(commandCategories)
+      .map(([category, commands]) => {
+        const listed = commands
+          .filter(cmd => commandFiles.includes(`${cmd}.js`))
+          .map(cmd => `│ - ${cmd}`)
+          .join('\n');
+        return `╭─╼━━━━━━━━╾─╮\n│ ${category}\n${listed}\n╰─━━━━━━━━━╾─╯`;
+      })
+      .join('\n');
+
+    sendMessage(
+      senderId,
+      {
+        text: `━━━━━━━━━━━━━━
+𝙰𝚟𝚊𝚒𝚕𝚊𝚋𝚕𝚎 𝙲𝚘𝚖𝚖𝚊𝚗𝚍𝚜:
+${categorizedMessage}
+Chat -help [name]   
+to see command details.
+━━━━━━━━━━━━━━`
+      },
+      pageAccessToken
+    );
   }
 };
