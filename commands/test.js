@@ -1,111 +1,37 @@
 const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
-
-const GROQ_API_KEY = 'gsk_Hq0by0R8j6vy4xJb3UWDWGd' + 'yb3FYtZIY5xpgchyRJCBUBWWF07DS';
-const conversations = new Map();
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-// Extract image URL from Messenger reply or original message
-async function getImageUrl(event, token) {
-  const mid = event?.message?.reply_to?.mid || event?.message?.mid;
-  if (!mid) return null;
-  try {
-    const { data } = await axios.get(
-      `https://graph.facebook.com/v23.0/${mid}/attachments`,
-      { params: { access_token: token } }
-    );
-    return data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url;
-  } catch (e) {
-    console.error('Image fetch error:', e?.response?.data || e.message);
-    return null;
-  }
-}
-
-// Convert image to base64 inline block for Groq API
-async function buildImageBlock(url) {
-  try {
-    const res = await axios.get(url, { responseType: 'arraybuffer' });
-    const mime = res.headers['content-type'];
-    const base64 = Buffer.from(res.data).toString('base64');
-    return {
-      type: 'image_url',
-      image_url: { url: `data:${mime};base64,${base64}` }
-    };
-  } catch (e) {
-    console.error('Image conversion error:', e.message);
-    return null;
-  }
-}
-
-// Send message to Groq API with chat history
-async function sendToGroq(messages) {
-  try {
-    const { data } = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages,
-        temperature: 0.7
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
-        }
-      }
-    );
-    const reply = data.choices?.[0]?.message?.content?.trim();
-    return reply ? { success: true, reply } : { success: false };
-  } catch (e) {
-    console.warn('Groq API error:', e?.response?.data || e.message);
-    return { success: false };
-  }
-}
+const API_KEY = 'gsk_Hq0by0R8j6vy4xJb3UWDWGd' + 'yb3FYtZIY5xpgchyRJCBUBWWF07DS';
+const history = new Map();
 
 module.exports = {
   name: 'groq',
-  description: 'Chat with Groq using llama‑3.3‑70b‑versatile (June 2025)',
-  usage: 'groq [prompt]',
+  description: 'Talk to Groq LLaMA 3.3',
+  usage: 'groq [message]',
   author: 'coffee',
 
-  async execute(senderId, args, token, event, sendMessage, imageCache) {
-    const prompt = args.join(' ').trim();
-    if (!prompt) {
-      return sendMessage(senderId, { text: '❓ Please enter your question.' }, token);
-    }
+  async execute(id, args, token, _, send) {
+    const q = args.join(' ').trim();
+    if (!q) return send(id, { text: '❓ Ask something.' }, token);
+    const h = history.get(id) || [];
+    h.push({ role: 'user', content: q });
 
-    let imageUrl = await getImageUrl(event, token);
-    const cached = imageCache?.get(senderId);
-    if (!imageUrl && cached && Date.now() - cached.timestamp < 300000) {
-      imageUrl = cached.url;
-    }
-    if (imageUrl) {
-      imageCache?.set(senderId, { url: imageUrl, timestamp: Date.now() });
-    }
+    try {
+      const r = await axios.post('https://api.groq.com/openai/v1/chat/completions', {
+        model: 'llama-3.3-70b-versatile', messages: h, temperature: 0.7
+      }, { headers: { Authorization: `Bearer ${API_KEY}` } });
 
-    const userMessage = imageUrl
-      ? [{ type: 'text', text: prompt }, await buildImageBlock(imageUrl)]
-      : prompt;
+      const reply = r.data.choices?.[0]?.message?.content?.trim();
+      if (!reply) throw 'Empty';
+      h.push({ role: 'assistant', content: reply });
+      history.set(id, h.slice(-20));
 
-    const history = conversations.get(senderId) || [];
-    history.push({ role: 'user', content: userMessage });
-
-    const { success, reply } = await sendToGroq(history);
-    if (!success) {
-      return sendMessage(senderId, { text: '❌ Groq API failed. Please try again later.' }, token);
-    }
-
-    history.push({ role: 'assistant', content: reply });
-    conversations.set(senderId, history.slice(-20));
-
-    const chunks = reply.match(/[\s\S]{1,1900}/g);
-    const prefix = '💬 | 𝙶𝚛𝚘𝚚 𝙻𝙻𝙼 (𝐋𝐋𝐀𝐌𝐀 𝟑.𝟑)\n・───────────・\n';
-    const suffix = '\n・──── >ᴗ< ────・';
-
-    for (let i = 0; i < chunks.length; i++) {
-      const text = (i === 0 ? prefix : '') + chunks[i] + (i === chunks.length - 1 ? suffix : '');
-      await sendMessage(senderId, { text }, token);
-      if (i < chunks.length - 1) await sleep(750);
+      const lines = reply.match(/[\s\S]{1,1900}/g);
+      for (let i = 0; i < lines.length; i++) {
+        await send(id, { text: (i === 0 ? '💬 Groq:\n' : '') + lines[i] }, token);
+        if (i + 1 < lines.length) await new Promise(r => setTimeout(r, 500));
+      }
+    } catch (e) {
+      await send(id, { text: '❌ Groq error.' }, token);
     }
   }
 };
