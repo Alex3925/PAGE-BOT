@@ -8,7 +8,7 @@ const axiosPost = (url, data, params = {}) => axios.post(url, data, { params }).
 const sendMessage = async (senderId, { text = '', attachment = null }, pageAccessToken) => {
   if (!text && !attachment) return;
 
-  const url = `https://graph.facebook.com/v22.0/me/messages`;
+  const url = `https://graph.facebook.com/v23.0/me/messages`;
   const params = { access_token: pageAccessToken };
 
   try {
