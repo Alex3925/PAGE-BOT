@@ -10,7 +10,7 @@ const commandCategories = {
 };
 
 module.exports = {
-  name: 'help',
+  name: 'test',
   description: 'Show available commands',
   usage: 'help\nhelp [command name]',
   author: 'System',
