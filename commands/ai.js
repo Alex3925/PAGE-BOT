@@ -29,7 +29,7 @@ const getImageUrl = async (e, token) => {
   const mid = e?.message?.reply_to?.mid || e?.message?.mid;
   if (!mid) return null;
   try {
-    const { data } = await axios.get(`https://graph.facebook.com/v22.0/${mid}/attachments`, {
+    const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token }
     });
     return data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
