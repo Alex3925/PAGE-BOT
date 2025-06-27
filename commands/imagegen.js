@@ -31,12 +31,12 @@ module.exports = {
       form.append('filedata', fs.createReadStream(file));
 
       const upload = await axios.post(
-        `https://graph.facebook.com/v22.0/me/message_attachments?access_token=${pageAccessToken}`,
+        `https://graph.facebook.com/v23.0/me/message_attachments?access_token=${pageAccessToken}`,
         form, { headers: form.getHeaders() }
       );
 
       const attachmentId = upload.data.attachment_id;
-      await axios.post(`https://graph.facebook.com/v22.0/me/messages?access_token=${pageAccessToken}`, {
+      await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`, {
         recipient: { id: senderId },
         message: { attachment: { type: 'image', payload: { attachment_id: attachmentId } } }
       });
