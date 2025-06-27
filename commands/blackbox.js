@@ -15,7 +15,9 @@ module.exports = {
 
   async execute(senderId, args, token) {
     const prompt = args.join(' ') || 'Hi';
-    const messages = [...(history.get(senderId) || []), { role: 'user', content: prompt }];
+    const past = history.get(senderId) || [];
+    const messages = [...past, { role: 'user', content: prompt }];
+
     const payload = {
       messages,
       id: senderId,
@@ -76,29 +78,25 @@ module.exports = {
           'content-type': 'application/json',
           'origin': 'https://www.blackbox.ai',
           'referer': `https://www.blackbox.ai/chat/${senderId}`,
-          'sec-ch-ua-platform': '"Android"',
-          'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
-          'sec-ch-ua': '"Brave";v="137", "Chromium";v="137", "Not/A)Brand";v="24"',
-          'sec-ch-ua-mobile': '?1',
-          'accept': '*/*',
-          'sec-gpc': '1',
-          'accept-language': 'en-US,en;q=0.8',
-          'accept-encoding': 'gzip, deflate, br, zstd',
-          'cookie': 'sessionId=336f68f2-86a9-4653-a5b5-b26e4c5f04d1; render_app_version_affinity=dep-d1f9t3vgi27c73civb40; intercom-id-x55eda6t=1325ddeb-f371-44c5-a740-4fa91af9b5e5; intercom-session-x55eda6t=; intercom-device-id-x55eda6t=caba25ea-2427-4046-817e-dbfa4cdfd569',
-          'sec-fetch-site': 'same-origin',
-          'sec-fetch-mode': 'cors',
-          'sec-fetch-dest': 'empty',
-          'priority': 'u=1, i'
+          'cookie': [
+            'sessionId=336f68f2-86a9-4653-a5b5-b26e4c5f04d1',
+            'render_app_version_affinity=dep-d1f9t3vgi27c73civb40',
+            'intercom-id-x55eda6t=1325ddeb-f371-44c5-a740-4fa91af9b5e5',
+            'intercom-session-x55eda6t=',
+            'intercom-device-id-x55eda6t=caba25ea-2427-4046-817e-dbfa4cdfd569'
+          ].join('; ')
         }
       });
 
       let out = typeof res.data === 'string' ? res.data : '';
       out = bold(out.replace(/\$~~~\$.*?\$~~~\$/gs, '').trim());
+
       history.set(senderId, [...messages, { role: 'assistant', content: out }].slice(-20));
 
-      for (const [i, part] of chunk(out).entries())
+      for (const [i, part] of chunk(out).entries()) {
         await sendMessage(senderId, { text: (i ? '' : head) + part + (i === chunk(out).length - 1 ? foot : '') }, token);
-    } catch {
+      }
+    } catch (e) {
       await sendMessage(senderId, { text: head + '❌ Failed to reach Blackbox.\n' + foot }, token);
     }
   }
