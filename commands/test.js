@@ -18,62 +18,14 @@ module.exports = {
     const past = history.get(senderId) || [];
     const messages = [...past, { role: 'user', content: prompt }];
 
-    const payload = {
-      messages,
-      id: senderId,
-      codeModelMode: true,
-      maxTokens: 1024,
-      validated: '00f37b34-a166-4efb-bce5-1312d87f2f94',
-      previewToken: null,
-      userId: null,
-      trendingAgentMode: {},
-      isMicMode: false,
-      userSystemPrompt: null,
-      playgroundTopP: null,
-      playgroundTemperature: null,
-      isChromeExt: false,
-      githubToken: '',
-      clickedAnswer2: false,
-      clickedAnswer3: false,
-      clickedForceWebSearch: false,
-      visitFromDelta: false,
-      isMemoryEnabled: false,
-      mobileClient: false,
-      userSelectedModel: null,
-      imageGenerationMode: false,
-      imageGenMode: 'autoMode',
-      webSearchModePrompt: false,
-      deepSearchMode: false,
-      domains: null,
-      vscodeClient: false,
-      codeInterpreterMode: false,
-      customProfile: {
-        name: '',
-        occupation: '',
-        traits: [],
-        additionalInfo: '',
-        enableNewChats: false
-      },
-      webSearchModeOption: {
-        autoMode: true,
-        webMode: false,
-        offlineMode: false
-      },
-      session: null,
-      isPremium: false,
-      subscriptionCache: null,
-      beastMode: false,
-      reasoningMode: false,
-      designerMode: false,
-      workspaceId: '',
-      asyncMode: false,
-      integrations: {},
-      isTaskPersistent: false,
-      selectedElement: null
-    };
-
     try {
-      const res = await axios.post('https://www.blackbox.ai/api/chat', payload, {
+      const res = await axios.post('https://www.blackbox.ai/api/chat', {
+        id: senderId,
+        messages,
+        codeModelMode: true,
+        maxTokens: 1024,
+        validated: '00f37b34-a166-4efb-bce5-1312d87f2f94'
+      }, {
         headers: {
           'content-type': 'application/json',
           'origin': 'https://www.blackbox.ai',
@@ -90,7 +42,6 @@ module.exports = {
 
       let out = typeof res.data === 'string' ? res.data : '';
       out = bold(out.replace(/\$~~~\$.*?\$~~~\$/gs, '').trim());
-
       history.set(senderId, [...messages, { role: 'assistant', content: out }].slice(-20));
 
       for (const [i, part] of chunk(out).entries()) {
