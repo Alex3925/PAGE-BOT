@@ -1,6 +1,13 @@
 const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
 
+const MODELS = [
+  { id: 'gpt-4o-mini', label: '🤖 GPT-4o Mini' },
+  { id: 'claude-3-haiku-20240307', label: '🧠 Claude 3 Haiku' },
+  { id: 'meta-llama/llama-3.3-70b-instruct-turbo', label: '🦙 LLaMA 3.3 70B' },
+  { id: 'mistral-small-3', label: '🌪️ Mistral Small 3' }
+];
+
 const splitText = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
 
 async function getSessionToken() {
@@ -10,45 +17,47 @@ async function getSessionToken() {
   return res.headers['x-vqd-4'];
 }
 
-async function streamReply(prompt, vqd) {
-  const res = await axios.post(
-    'https://duckduckgo.com/duckchat/v1/chat',
-    {
-      model: 'gpt-4o-mini', // explicitly request GPT-4o-mini
-      messages: [{ role: 'user', content: prompt }]
-    },
-    {
-      headers: {
-        'x-vqd-4': vqd,
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream'
-      },
-      responseType: 'stream'
-    }
-  );
+async function tryModel(prompt, modelId, vqd) {
+  try {
+    const res = await axios.post(
+      'https://duckduckgo.com/duckchat/v1/chat',
+      { model: modelId, messages: [{ role: 'user', content: prompt }] },
+      {
+        headers: {
+          'x-vqd-4': vqd,
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream'
+        },
+        responseType: 'stream'
+      }
+    );
 
-  return new Promise((resolve, reject) => {
-    let result = '';
-    res.data.on('data', chunk => {
-      const lines = chunk.toString().split('\n');
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = JSON.parse(line.slice(6));
-          if (payload.message) result += payload.message;
-          if (payload.action === 'success') {
-            res.data.destroy();
-            resolve(result);
+    return await new Promise((resolve, reject) => {
+      let reply = '';
+      res.data.on('data', chunk => {
+        const lines = chunk.toString().split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const json = JSON.parse(line.slice(6));
+            if (json.message) reply += json.message;
+            if (json.action === 'success') {
+              res.data.destroy();
+              return resolve(reply);
+            }
           }
         }
-      }
+      });
+      res.data.on('error', reject);
     });
-    res.data.on('error', reject);
-  });
+  } catch (err) {
+    console.warn(`❌ ${modelId} failed:`, err.message || err);
+    return null;
+  }
 }
 
 module.exports = {
   name: 'test',
-  description: 'Talk to GPT-4o Mini via DuckDuckGo',
+  description: 'Talk to any available model via DuckDuckGo AI',
   usage: 'duckchat <your message>',
   author: 'coffee',
 
@@ -56,16 +65,25 @@ module.exports = {
     const prompt = args.join(' ').trim();
     if (!prompt) return sendMessage(senderId, { text: '❓ Please provide a message.' }, token);
 
+    let vqd;
     try {
-      const vqd = await getSessionToken();
-      const reply = await streamReply(prompt, vqd);
-
-      for (const part of splitText(reply)) {
-        await sendMessage(senderId, { text: part }, token);
-      }
-    } catch (err) {
-      console.error('❌ DuckChat error:', err?.response?.data || err.message);
-      await sendMessage(senderId, { text: '❌ Failed to reach GPT-4o Mini via DuckChat.' }, token);
+      vqd = await getSessionToken();
+    } catch (e) {
+      return sendMessage(senderId, { text: '❌ Failed to get session token.' }, token);
     }
+
+    for (const { id, label } of MODELS) {
+      const reply = await tryModel(prompt, id, vqd);
+      if (reply) {
+        const chunks = splitText(reply);
+        for (let i = 0; i < chunks.length; i++) {
+          const prefix = i === 0 ? `${label}\n\n` : '';
+          await sendMessage(senderId, { text: prefix + chunks[i] }, token);
+        }
+        return;
+      }
+    }
+
+    await sendMessage(senderId, { text: '❌ All models failed. Try again later.' }, token);
   }
 };
