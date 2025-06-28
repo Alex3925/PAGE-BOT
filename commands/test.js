@@ -1,37 +1,71 @@
 const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
 
-const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
-  [...w].map(c => {
-    const code = c.codePointAt(0);
-    return /[A-Z]/.test(c) ? String.fromCodePoint(code + 0x1D400 - 65)
-         : /[a-z]/.test(c) ? String.fromCodePoint(code + 0x1D41A - 97)
-         : /\d/.test(c)     ? String.fromCodePoint(code + 0x1D7CE - 48)
-         : c;
-  }).join('')
-);
+const splitText = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
 
-const split = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
+async function getSessionToken() {
+  const res = await axios.get('https://duckduckgo.com/duckchat/v1/status', {
+    headers: { 'x-vqd-accept': '1' }
+  });
+  return res.headers['x-vqd-4'];
+}
+
+async function streamReply(prompt, vqd) {
+  const res = await axios.post(
+    'https://duckduckgo.com/duckchat/v1/chat',
+    {
+      model: 'gpt-4o-mini', // explicitly request GPT-4o-mini
+      messages: [{ role: 'user', content: prompt }]
+    },
+    {
+      headers: {
+        'x-vqd-4': vqd,
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream'
+      },
+      responseType: 'stream'
+    }
+  );
+
+  return new Promise((resolve, reject) => {
+    let result = '';
+    res.data.on('data', chunk => {
+      const lines = chunk.toString().split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const payload = JSON.parse(line.slice(6));
+          if (payload.message) result += payload.message;
+          if (payload.action === 'success') {
+            res.data.destroy();
+            resolve(result);
+          }
+        }
+      }
+    });
+    res.data.on('error', reject);
+  });
+}
 
 module.exports = {
   name: 'test',
-  description: 'Free GPT (no key needed)',
-  usage: 'ai <question>',
+  description: 'Talk to GPT-4o Mini via DuckDuckGo',
+  usage: 'duckchat <your message>',
   author: 'coffee',
 
-  async execute(senderId, args, token) {
-    const q = encodeURIComponent(args.join(' ') || 'hello');
-    const url = `https://free-unoficial-gpt4o-mini-api-g70n.onrender.com/chat/?query=${q}`;
+  async execute(senderId, args, token, event, sendMessage) {
+    const prompt = args.join(' ').trim();
+    if (!prompt) return sendMessage(senderId, { text: '❓ Please provide a message.' }, token);
 
     try {
-      const { data } = await axios.get(url);
-      const resp = bold(data?.response ?? '✅ No response.');
-      for (const chunk of split(resp)) {
-        await sendMessage(senderId, { text: chunk }, token);
+      const vqd = await getSessionToken();
+      const reply = await streamReply(prompt, vqd);
+
+      for (const part of splitText(reply)) {
+        await sendMessage(senderId, { text: part }, token);
       }
     } catch (err) {
-      console.error('❌ Free GPT error:', err?.message);
-      await sendMessage(senderId, { text: '❌ Failed to reach free GPT API.' }, token);
+      console.error('❌ DuckChat error:', err?.response?.data || err.message);
+      await sendMessage(senderId, { text: '❌ Failed to reach GPT-4o Mini via DuckChat.' }, token);
     }
   }
 };
