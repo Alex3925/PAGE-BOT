@@ -10,23 +10,35 @@ const MODELS = [
 
 const splitText = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
 
-async function getSessionToken() {
+async function getSession() {
   const res = await axios.get('https://duckduckgo.com/duckchat/v1/status', {
     headers: { 'x-vqd-accept': '1' }
   });
-  return res.headers['x-vqd-4'];
+  return {
+    vqd: res.headers['x-vqd-4'] || '',
+    feVer: res.headers['x-fe-version'] || '', 
+    signals: res.headers['x-fe-signals'] || ''
+  };
 }
 
-async function tryModel(prompt, modelId, vqd) {
+async function tryModel(prompt, { id, label }, session) {
   try {
     const res = await axios.post(
       'https://duckduckgo.com/duckchat/v1/chat',
-      { model: modelId, messages: [{ role: 'user', content: prompt }] },
+      {
+        model: id,
+        metadata: { toolChoice: { NewsSearch: false, VideosSearch: false, LocalSearch: false, WeatherForecast: false } },
+        messages: [{ role: 'user', content: prompt }],
+        canUseTools: true
+      },
       {
         headers: {
-          'x-vqd-4': vqd,
+          'x-vqd-4': session.vqd,
+          'x-fe-version': session.feVer,
+          'x-fe-signals': session.signals,
+          'x-vqd-hash-1': session.signals,
           'Content-Type': 'application/json',
-          Accept: 'text/event-stream'
+          'Accept': 'text/event-stream'
         },
         responseType: 'stream'
       }
@@ -38,26 +50,26 @@ async function tryModel(prompt, modelId, vqd) {
         const lines = chunk.toString().split('\n');
         for (const line of lines) {
           if (line.startsWith('data: ')) {
-            const json = JSON.parse(line.slice(6));
-            if (json.message) reply += json.message;
-            if (json.action === 'success') {
+            const d = JSON.parse(line.slice(6));
+            if (d.message) reply += d.message;
+            if (d.action === 'success') {
               res.data.destroy();
-              return resolve(reply);
+              return resolve({ text: reply, label });
             }
           }
         }
       });
       res.data.on('error', reject);
     });
-  } catch (err) {
-    console.warn(`❌ ${modelId} failed:`, err.message || err);
+  } catch (e) {
+    console.warn(`❌ ${label} failed:`, e.message || e);
     return null;
   }
 }
 
 module.exports = {
   name: 'test',
-  description: 'Talk to any available model via DuckDuckGo AI',
+  description: 'Talk to Duck.ai with official headers & model fallback',
   usage: 'duckchat <your message>',
   author: 'coffee',
 
@@ -65,19 +77,19 @@ module.exports = {
     const prompt = args.join(' ').trim();
     if (!prompt) return sendMessage(senderId, { text: '❓ Please provide a message.' }, token);
 
-    let vqd;
+    let session;
     try {
-      vqd = await getSessionToken();
-    } catch (e) {
-      return sendMessage(senderId, { text: '❌ Failed to get session token.' }, token);
+      session = await getSession();
+    } catch {
+      return sendMessage(senderId, { text: '❌ Failed to obtain session token.' }, token);
     }
 
-    for (const { id, label } of MODELS) {
-      const reply = await tryModel(prompt, id, vqd);
-      if (reply) {
-        const chunks = splitText(reply);
+    for (const model of MODELS) {
+      const result = await tryModel(prompt, model, session);
+      if (result) {
+        const chunks = splitText(result.text);
         for (let i = 0; i < chunks.length; i++) {
-          const prefix = i === 0 ? `${label}\n\n` : '';
+          const prefix = i === 0 ? `${result.label}\n\n` : '';
           await sendMessage(senderId, { text: prefix + chunks[i] }, token);
         }
         return;
