@@ -14,22 +14,24 @@ const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
 const split = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
 
 module.exports = {
-  name: 'gpt',
+  name: 'test',
   description: 'Free GPT (no key needed)',
   usage: 'ai <question>',
   author: 'coffee',
 
-  async execute(senderId, args, sendMessage) {
+  async execute(senderId, args, token) {
     const q = encodeURIComponent(args.join(' ') || 'hello');
     const url = `https://free-unoficial-gpt4o-mini-api-g70n.onrender.com/chat/?query=${q}`;
 
     try {
       const { data } = await axios.get(url);
       const resp = bold(data?.response ?? '✅ No response.');
-      for (const chunk of split(resp)) await sendMessage(senderId, chunk);
+      for (const chunk of split(resp)) {
+        await sendMessage(senderId, { text: chunk }, token);
+      }
     } catch (err) {
       console.error('❌ Free GPT error:', err?.message);
-      await sendMessage(senderId, '❌ Failed to reach free GPT API.');
+      await sendMessage(senderId, { text: '❌ Failed to reach free GPT API.' }, token);
     }
   }
 };
