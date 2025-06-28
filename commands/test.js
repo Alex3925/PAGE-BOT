@@ -1,36 +1,57 @@
-const axios = require('axios'), { sendMessage } = require('../handles/sendMessage');
-const b64 = s => Buffer.from(s, 'base64').toString(), B = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
-const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, x) => [...x].map(c =>
-  /[a-z]/.test(c) ? String.fromCodePoint(c.charCodeAt(0)+0x1D41A-97) :
-  /[A-Z]/.test(c) ? String.fromCodePoint(c.charCodeAt(0)+0x1D400-65) :
-  /[0-9]/.test(c) ? String.fromCodePoint(c.charCodeAt(0)+0x1D7CE-48) : c).join(''));
+const axios = require('axios');
+const { sendMessage } = require('../handles/sendMessage');
 
-const getImage = async (e, t) => {
-  const m = e?.message?.reply_to?.mid || e?.message?.mid;
-  if (!m) return null;
+const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
+  [...w].map(c => {
+    const code = c.codePointAt(0);
+    return /[A-Z]/.test(c) ? String.fromCodePoint(code + 0x1D400 - 65)
+         : /[a-z]/.test(c) ? String.fromCodePoint(code + 0x1D41A - 97)
+         : /\d/.test(c)     ? String.fromCodePoint(code + 0x1D7CE - 48)
+         : c;
+  }).join('')
+);
+
+const split = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
+
+const getImageUrl = async (e, token) => {
+  const mid = e?.message?.reply_to?.mid || e?.message?.mid;
+  if (!mid) return null;
   try {
-    const u = `${b64('aHR0cHM6Ly9ncmFwaC5mYWNlYm9vay5jb20vdjIzLjAv')}${m}/attachments`;
-    const d = (await axios.get(u, { params: { access_token: t } })).data?.data?.[0];
-    return d?.image_data?.url || d?.file_url || null;
-  } catch { return null; }
+    const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
+      params: { access_token: token }
+    });
+    const a = data?.data?.[0];
+    return a?.image_data?.url ?? a?.file_url ?? null;
+  } catch (err) {
+    console.error('🖼️ Image error:', err?.response?.data || err.message);
+    return null;
+  }
 };
 
 module.exports = {
-  name: 'test', description: 'Interact with ChatGPT', usage: 'ai <question>', author: 'Coffee',
-  async execute(id, args, token, e, send, cache) {
-    const q = args.join(' ').trim() || 'hello';
-    let img = await getImage(e, token);
-    if (!img && cache?.get(id)?.timestamp > Date.now() - 3e5) img = cache.get(id).url;
-    const prompt = encodeURIComponent(img ? `${q}\n[Image: ${img}]` : q);
-    const url = `${b64('aHR0cHM6Ly9rYWl6LWFwaXMuZ2xlZXplLmNvbS9hcGkvZ3B0LTRvP2Fzaz0=')}${prompt}${b64('JmFwaWtleT0wYmMxZTIwZS1lYzQ3LTRjOTItYTYxZi0xYzYyNmU3ZWRhYjcmV2ViU2VhcmNoPW9mZiZ1aWQ9')}${id}`;
+  name: 'test',
+  description: 'Interact with ChatGPT',
+  usage: 'ai <prompt>',
+  author: 'coffee',
+
+  async execute(senderId, args, token, event, sendMessage, imageCache) {
+    const q = args.join(' ') || 'hello';
+    let image = await getImageUrl(event, token);
+    if (!image && imageCache?.has(senderId)) {
+      const cached = imageCache.get(senderId);
+      if (Date.now() - cached.timestamp < 300_000) image = cached.url;
+    }
+
+    const prompt = image ? `${q}\n[Image: ${image}]` : q;
+    const url = `https://kaiz-apis.gleeze.com/api/gpt-4o?ask=${encodeURIComponent(prompt)}&uid=${senderId}&webSearch=off&apikey=0bc1e20e-ec47-4c92-a61f-1c626e7edab7`;
 
     try {
-      const res = await axios.get(url), txt = bold(res?.data?.response || '✅ No reply.');
-      const pre = '💬 | 𝙲𝚑𝚊𝚝𝙶𝙿𝚃\n・───────────・\n', suf = '\n・──── >ᴗ< ────・';
-      for (let [i, p] of B(txt).entries()) await send(id, (i ? '' : pre) + p + (i === B(txt).length - 1 ? suf : ''));
+      const { data } = await axios.get(url);
+      const response = bold(data?.response ?? '✅ No reply.');
+      for (const chunk of split(response)) await sendMessage(senderId, chunk);
     } catch (err) {
       console.error('❌ AI error:', err?.response?.data || err.message);
-      await send(id, '❌ Failed to contact ChatGPT.');
+      await sendMessage(senderId, '❌ ChatGPT API failed.');
     }
   }
 };
