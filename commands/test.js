@@ -1,8 +1,6 @@
 const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
 
-const conversations = new Map();
-
 const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
   [...w].map(c => {
     const code = c.codePointAt(0);
@@ -13,39 +11,25 @@ const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
   }).join('')
 );
 
-const split = (text, n = 1900) => text.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
+const split = (t, n = 1900) => t.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
 
 module.exports = {
-  name: 'perplexity',
-  description: 'Ask anything via Perplexity AI',
-  usage: 'perplexity <your question>',
+  name: 'gpt',
+  description: 'Free GPT (no key needed)',
+  usage: 'ai <question>',
   author: 'coffee',
 
-  async execute(senderId, args, token, event, sendMessage) {
-    const query = args.join(' ').trim();
-    if (!query) return sendMessage(senderId, '❓ | Please provide a question.');
-
-    const history = conversations.get(senderId) || [];
-    history.push({ role: 'user', content: query });
+  async execute(senderId, args, sendMessage) {
+    const q = encodeURIComponent(args.join(' ') || 'hello');
+    const url = `https://free-unoficial-gpt4o-mini-api-g70n.onrender.com/chat/?query=${q}`;
 
     try {
-      const { data } = await axios.post('https://api.perplexity.dev/chat', {
-        model: 'llama-3-sonar-large-32k-online',
-        messages: history
-      }, {
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      const reply = data?.choices?.[0]?.message?.content ?? '✅ No response.';
-      history.push({ role: 'assistant', content: reply });
-      conversations.set(senderId, history.slice(-20)); // keep last 20 exchanges
-
-      for (const chunk of split(bold(reply)))
-        await sendMessage(senderId, chunk);
-
+      const { data } = await axios.get(url);
+      const resp = bold(data?.response ?? '✅ No response.');
+      for (const chunk of split(resp)) await sendMessage(senderId, chunk);
     } catch (err) {
-      console.error('❌ Perplexity API Error:', err?.response?.data || err.message);
-      await sendMessage(senderId, '❌ Failed to reach Perplexity API.');
+      console.error('❌ Free GPT error:', err?.message);
+      await sendMessage(senderId, '❌ Failed to reach free GPT API.');
     }
   }
 };
