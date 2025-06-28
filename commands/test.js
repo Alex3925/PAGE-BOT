@@ -14,7 +14,7 @@ const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
 const split = (text, n = 1900) => text.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
 
 module.exports = {
-  name: 'test',
+  name: 'bot',
   description: 'Interact with ChatGPT',
   usage: 'ai <prompt>',
   author: 'coffee',
