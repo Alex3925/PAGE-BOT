@@ -1,6 +1,8 @@
 const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
 
+const conversations = new Map();
+
 const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
   [...w].map(c => {
     const code = c.codePointAt(0);
@@ -14,22 +16,36 @@ const bold = t => t.replace(/\*\*(.+?)\*\*/g, (_, w) =>
 const split = (text, n = 1900) => text.match(new RegExp(`.{1,${n}}`, 'gs')) || [];
 
 module.exports = {
-  name: 'bot',
-  description: 'Interact with ChatGPT',
-  usage: 'ai <prompt>',
+  name: 'perplexity',
+  description: 'Ask anything via Perplexity AI',
+  usage: 'perplexity <your question>',
   author: 'coffee',
 
   async execute(senderId, args, token, event, sendMessage) {
-    const prompt = args.join(' ') || 'hello';
-    const url = `https://kaiz-apis.gleeze.com/api/gpt-4o?ask=${encodeURIComponent(prompt)}&uid=${senderId}&webSearch=off&apikey=0bc1e20e-ec47-4c92-a61f-1c626e7edab7`;
+    const query = args.join(' ').trim();
+    if (!query) return sendMessage(senderId, '❓ | Please provide a question.');
+
+    const history = conversations.get(senderId) || [];
+    history.push({ role: 'user', content: query });
 
     try {
-      const { data } = await axios.get(url);
-      const response = bold(data?.response ?? '✅ No response.');
-      for (const chunk of split(response)) await sendMessage(senderId, chunk);
+      const { data } = await axios.post('https://api.perplexity.dev/chat', {
+        model: 'llama-3-sonar-large-32k-online',
+        messages: history
+      }, {
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+      const reply = data?.choices?.[0]?.message?.content ?? '✅ No response.';
+      history.push({ role: 'assistant', content: reply });
+      conversations.set(senderId, history.slice(-20)); // keep last 20 exchanges
+
+      for (const chunk of split(bold(reply)))
+        await sendMessage(senderId, chunk);
+
     } catch (err) {
-      console.error('❌ AI error:', err?.response?.data || err.message);
-      await sendMessage(senderId, '❌ Failed to reach ChatGPT.');
+      console.error('❌ Perplexity API Error:', err?.response?.data || err.message);
+      await sendMessage(senderId, '❌ Failed to reach Perplexity API.');
     }
   }
 };
