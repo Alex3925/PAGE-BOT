@@ -55,6 +55,7 @@ module.exports = {
   async execute(senderId, args, pageAccessToken, event, sendMessage, imageCache) {
     const rawPrompt = args.join(' ').trim() || 'Hello';
     const chatSessionId = getNextSessionId();
+
     const imageUrl = await getImageUrl(event, pageAccessToken, imageCache);
     const prompt = imageUrl ? `${rawPrompt}\n\nImage URL: ${imageUrl}` : rawPrompt;
 
@@ -80,51 +81,63 @@ module.exports = {
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
-      const textData = typeof data === 'string' ? data : JSON.stringify(data);
-      const responseTextChunks = textData.match(/"result":"(.*?)"/g)?.map(c => c.slice(10, -1).replace(/\\n/g, '\n')) ||
-                                 textData.match(/0:"(.*?)"/g)?.map(c => c.slice(3, -1).replace(/\\n/g, '\n')) || [];
-      const fullResponseText = responseTextChunks.join('');
+      const textResponse = Array.isArray(data?.choices?.[0]?.message?.parts)
+        ? data.choices[0].message.parts.map(p => p.text).join('\n').trim()
+        : '';
 
       const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
 
-      if (fullResponseText) {
-        conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
+      if (textResponse) {
+        conversationHistory[senderId].push({ role: 'assistant', content: textResponse });
       }
 
+      // Handle tool calls
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          let imgUrl = toolCall.result.trim();
-          if (imgUrl.endsWith(')')) imgUrl = imgUrl.slice(0, -1);
-
-          if (imgUrl.startsWith('https://storage.googleapis.com/chipp-images/')) {
-            await sendMessage(senderId, {
-              attachment: {
-                type: 'image',
-                payload: { url: imgUrl, is_reusable: true }
+          const url = toolCall.result.trim().replace(/[)\]]+$/, '');
+          await sendMessage(senderId, {
+            attachment: {
+              type: 'image',
+              payload: {
+                url,
+                is_reusable: true
               }
-            }, pageAccessToken);
-          } else {
-            await sendMessage(senderId, { text: `🖼️ Generated Image:\n${imgUrl}` }, pageAccessToken);
-          }
+            }
+          }, pageAccessToken);
           return;
         }
 
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
-          const readable = Array.isArray(data?.parts)
-            ? data.parts.find(p => p.type === 'text')?.text
-            : fullResponseText;
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
+          const browseText = Array.isArray(data?.choices?.[0]?.message?.parts)
+            ? data.choices[0].message.parts.map(p => p.text).join('\n').trim()
+            : 'No response.';
 
-          if (readable) {
-            const finalReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${readable}\n・──── >ᴗ< ────・`;
-            await sendMessage(senderId, { text: finalReply }, pageAccessToken);
-            return;
-          }
+          await sendMessage(senderId, {
+            text: `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${browseText}\n・──── >ᴗ< ────・`
+          }, pageAccessToken);
+          return;
         }
       }
 
-      if (!fullResponseText) throw new Error('Empty response from AI.');
+      // If the response contains a chipp-generated image URL, send preview
+      const match = textResponse.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s)\]]+/);
+      if (match) {
+        const cleanUrl = match[0].replace(/[)\]]+$/, '');
+        await sendMessage(senderId, {
+          attachment: {
+            type: 'image',
+            payload: {
+              url: cleanUrl,
+              is_reusable: true
+            }
+          }
+        }, pageAccessToken);
+        return;
+      }
 
-      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
+      if (!textResponse) throw new Error('Empty response from AI.');
+
+      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${textResponse}\n・──── >ᴗ< ────・`;
       for (const chunk of chunkMessage(formatted)) {
         await sendMessage(senderId, { text: chunk }, pageAccessToken);
       }
