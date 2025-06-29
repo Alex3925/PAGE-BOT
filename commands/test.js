@@ -38,7 +38,7 @@ const sessionIds = [
   "07ac79aa-177c-4ed9-a5cd-fa87bda63831",
   "e10a6247-623f-4337-8cd0-bc98972c487f",
   "fc053908-a0f3-4a9c-ad4a-008105dcc360",
-  "348ce44e-eeed-49ad-b3e5-f4eca5069b4b"
+  "a14da8a4-6566-45bd-b589-0f3dff2a1779"
 ];
 
 let sessionIndex = 0;
@@ -92,7 +92,7 @@ module.exports = {
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
 
-      const streamed = textData.match(/0:"(.*?)"/g);
+      const streamed = textData.match(/0:\"(.*?)\"/g);
       const fullResponseText = streamed?.map(t => t.slice(3, -1).replace(/\\n/g, '\n')).join('') || '';
 
       const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
@@ -101,27 +101,10 @@ module.exports = {
         conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
       }
 
-      for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
-          return;
-        }
-
-        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
-          return;
-        }
-
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
-          const streamedAnswerOnly = fullResponseText.trim();
-          if (streamedAnswerOnly) {
-            conversationHistory[senderId].push({ role: 'assistant', content: streamedAnswerOnly });
-            await sendMessage(senderId, {
-              text: `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${streamedAnswerOnly}\n・──── >ᴗ< ────・`
-            }, pageAccessToken);
-          }
-          return;
-        }
+      if (toolCalls.length > 0) {
+        const finalReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
+        await sendMessage(senderId, { text: finalReply }, pageAccessToken);
+        return;
       }
 
       if (!fullResponseText) throw new Error('Empty response from AI.');
