@@ -14,7 +14,7 @@ const getImageUrl = async (event, token, cache) => {
     }
   }
   const c = cache?.get(event.sender.id);
-  return c && Date.now() - c.timestamp < 3e5 ? c.url : null;
+  return c && Date.now() - c.timestamp < 300000 ? c.url : null;
 };
 
 const sessionIds = [
@@ -27,11 +27,18 @@ const sessionIds = [
   "a14da8a4-6566-45bd-b589-0f3dff2a1779"
 ];
 let sessionIndex = 0;
-const getNextSessionId = () => sessionIds[sessionIndex++ % sessionIds.length];
+
+const getNextSessionId = () => {
+  const id = sessionIds[sessionIndex];
+  sessionIndex = (sessionIndex + 1) % sessionIds.length;
+  return id;
+};
 
 const chunkMessage = (text, max = 1900) => {
   const chunks = [];
-  for (let i = 0; i < text.length; i += max) chunks.push(text.slice(i, i + max));
+  for (let i = 0; i < text.length; i += max) {
+    chunks.push(text.slice(i, i + max));
+  }
   return chunks;
 };
 
@@ -87,26 +94,19 @@ module.exports = {
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const imageLink = toolCall.result;
-          if (/^https:\/\/storage\.googleapis\.com\/chipp-images\//.test(imageLink)) {
-            // Send image as Messenger preview
-            await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`, {
-              recipient: { id: senderId },
-              message: {
-                attachment: {
-                  type: 'image',
-                  payload: {
-                    url: imageLink,
-                    is_reusable: false
-                  }
+          await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`, {
+            recipient: { id: senderId },
+            message: {
+              attachment: {
+                type: 'image',
+                payload: {
+                  url: toolCall.result,
+                  is_reusable: false
                 }
               }
-            });
-            return;
-          } else {
-            await sendMessage(senderId, { text: `🖼️ Generated Image:\n${imageLink}` }, pageAccessToken);
-            return;
-          }
+            }
+          });
+          return;
         }
 
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
@@ -129,5 +129,5 @@ module.exports = {
       console.error('AI Command Error:', err?.response?.data || err.message || err);
       await sendMessage(senderId, { text: '❎ | An error occurred. Please try again later.' }, pageAccessToken);
     }
-  }
+  },
 };
