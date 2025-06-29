@@ -93,15 +93,15 @@ module.exports = {
       }
 
       for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result') {
-          const match = fullResponseText.match(/(https:\/\/[^)]+)/);
-          const imageUrl = match?.[1];
-          if (imageUrl) {
+        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
+          const imageUrl = toolCall.result.trim();
+          if (imageUrl.startsWith('https://storage.googleapis.com/chipp-images/chat-image-generations')) {
             await sendMessage(senderId, { text: imageUrl }, pageAccessToken);
+            return;
           } else {
-            await sendMessage(senderId, { text: '❎ | Could not extract image URL.' }, pageAccessToken);
+            await sendMessage(senderId, { text: `🖼️ Generated Image:\n${imageUrl}` }, pageAccessToken);
+            return;
           }
-          return;
         }
 
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
