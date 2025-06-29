@@ -1,11 +1,10 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const FormData = require('form-data');
 const { sendMessage } = require('../handles/sendMessage');
 
 const conversationHistory = {};
-const lastImagePerSender = {};
+const imageCache = new Map();
 
 const getImageUrl = async (event, token) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
@@ -29,35 +28,6 @@ const chunkMessage = (text, max = 1900) => {
     chunks.push(text.slice(i, i + max));
   }
   return chunks;
-};
-
-const uploadImageToFacebook = async (imageUrl, token) => {
-  const tmpFilePath = path.join(__dirname, `tmp_${Date.now()}.jpg`);
-  const response = await axios.get(imageUrl, { responseType: 'stream' });
-  const writer = fs.createWriteStream(tmpFilePath);
-  response.data.pipe(writer);
-  await new Promise((resolve, reject) => {
-    writer.on('finish', resolve);
-    writer.on('error', reject);
-  });
-
-  const form = new FormData();
-  form.append('message', JSON.stringify({
-    attachment: {
-      type: 'image',
-      payload: { is_reusable: true },
-    },
-  }));
-  form.append('filedata', fs.createReadStream(tmpFilePath));
-
-  const uploadRes = await axios.post(
-    `https://graph.facebook.com/v23.0/me/message_attachments?access_token=${token}`,
-    form,
-    { headers: form.getHeaders() }
-  );
-
-  fs.unlinkSync(tmpFilePath);
-  return uploadRes.data.attachment_id;
 };
 
 module.exports = {
@@ -87,8 +57,15 @@ module.exports = {
     try {
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
 
-      const imageUrl = await getImageUrl(event, pageAccessToken) || lastImagePerSender[senderId] || null;
-      if (imageUrl) lastImagePerSender[senderId] = imageUrl;
+      let imageUrl = await getImageUrl(event, pageAccessToken);
+      const cached = imageCache.get(senderId);
+      if (!imageUrl && cached && Date.now() - cached.timestamp <= 300000) {
+        imageUrl = cached.url;
+      }
+
+      if (imageUrl) {
+        imageCache.set(senderId, { url: imageUrl, timestamp: Date.now() });
+      }
 
       let payload;
       if (imageUrl) {
@@ -118,20 +95,7 @@ module.exports = {
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const match = toolCall.result.match(/!Generated Image:\s*(.*?)(https?:\/\/[^\s)]+)/i);
-          if (!match) throw new Error('Invalid image format in result.');
-
-          const imageUrl = match[2];
-          const attachmentId = await uploadImageToFacebook(imageUrl, pageAccessToken);
-          await axios.post(`https://graph.facebook.com/v22.0/me/messages?access_token=${pageAccessToken}`, {
-            recipient: { id: senderId },
-            message: {
-              attachment: {
-                type: 'image',
-                payload: { attachment_id: attachmentId }
-              }
-            }
-          });
+          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
           return;
         }
 
