@@ -114,7 +114,7 @@ module.exports = {
     };
 
     try {
-      const { data } = await axios.post("https://digitalprotg-32922.chipp.ai", payload, { headers });
+      const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
       const tools = data?.choices?.[0]?.message?.toolInvocations || [];
       for (const t of tools) {
