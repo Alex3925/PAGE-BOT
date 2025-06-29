@@ -11,7 +11,8 @@ const getImageUrl = async (event, token) => {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
     });
-    return data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
+    const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
+    return imageUrl;
   } catch (err) {
     console.error("Image URL fetch error:", err?.response?.data || err.message);
     return null;
@@ -26,6 +27,9 @@ const chunkMessage = (text, max = 1900) => {
   return chunks;
 };
 
+// Dynamic conversation history per sender
+const conversationHistory = {};
+
 module.exports = {
   name: 'test',
   description: 'Interact with Mocha AI using text queries and image analysis',
@@ -34,8 +38,7 @@ module.exports = {
 
   async execute(senderId, args, pageAccessToken, event) {
     const prompt = args.join(' ').trim() || 'Hello';
-    const chatSessionId = senderId;
-
+    const chatSessionId = senderId; // Use senderId for per-user chat
     const headers = {
       "content-type": "application/json",
       "sec-ch-ua-platform": "\"Android\"",
@@ -52,28 +55,34 @@ module.exports = {
 
     try {
       const imageUrl = await getImageUrl(event, pageAccessToken);
+      if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
 
-      let payload;
+      conversationHistory[senderId].push({ role: 'user', content: prompt });
+
+      const payload = {
+        chatSessionId,
+        messages: conversationHistory[senderId],
+      };
+
       if (imageUrl) {
-        payload = {
-          messages: [{ role: 'user', content: `${prompt}\nImage URL: ${imageUrl}` }],
-          chatSessionId,
-          toolInvocations: [{
-            toolName: 'analyzeImage',
-            args: { userQuery: prompt, imageUrls: [imageUrl] }
-          }]
-        };
-      } else {
-        payload = {
-          messages: [{ role: 'user', content: prompt }],
-          chatSessionId
-        };
+        payload.toolInvocations = [{
+          toolName: 'analyzeImage',
+          args: { userQuery: prompt, imageUrls: [imageUrl] }
+        }];
       }
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
-      const toolCalls = data?.messages?.[1]?.toolInvocations || [];
-      const answerParts = data?.messages?.[1]?.parts?.filter(p => p.type === "text").map(p => p.text).join('') || '';
+      const textData = typeof data === 'string' ? data : JSON.stringify(data);
+      const responseTextChunks = textData.match(/"result":"(.*?)"/g)?.map(c => c.slice(10, -1).replace(/\\n/g, '\n')) ||
+                                 textData.match(/0:"(.*?)"/g)?.map(c => c.slice(3, -1).replace(/\\n/g, '\n')) || [];
+
+      const fullResponseText = responseTextChunks.join('');
+      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
+
+      if (fullResponseText) {
+        conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
+      }
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
@@ -87,18 +96,18 @@ module.exports = {
         }
 
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
-          const snippets = toolCall.result.organic?.map(r => r.snippet).filter(Boolean).join('\n\n') || '';
-          const response = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${answerParts}\n\n🔎 Browse result:\n${snippets}\n・──── >ᴗ< ────・`;
-          for (const chunk of chunkMessage(response)) {
-            await sendMessage(senderId, { text: chunk }, pageAccessToken);
-          }
+          const snippets = toolCall.result.answerBox?.answer ||
+            toolCall.result.organic?.map(o => o.snippet).filter(Boolean).join('\n\n') || 'No relevant info found.';
+          const finalReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n\nBrowse result:\n${snippets}\n・──── >ᴗ< ────・`;
+          await sendMessage(senderId, { text: finalReply }, pageAccessToken);
           return;
         }
       }
 
-      const fallback = answerParts || '❎ | No response received from the assistant.';
-      const final = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fallback}\n・──── >ᴗ< ────・`;
-      for (const chunk of chunkMessage(final)) {
+      if (!fullResponseText) throw new Error('Empty response from AI.');
+
+      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
+      for (const chunk of chunkMessage(formatted)) {
         await sendMessage(senderId, { text: chunk }, pageAccessToken);
       }
 
