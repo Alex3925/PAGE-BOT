@@ -1,4 +1,7 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const FormData = require('form-data');
 const { sendMessage } = require('../handles/sendMessage');
 
 const getImageUrl = async (event, token, cache) => {
@@ -27,18 +30,11 @@ const sessionIds = [
   "a14da8a4-6566-45bd-b589-0f3dff2a1779"
 ];
 let sessionIndex = 0;
-
-const getNextSessionId = () => {
-  const id = sessionIds[sessionIndex];
-  sessionIndex = (sessionIndex + 1) % sessionIds.length;
-  return id;
-};
+const getNextSessionId = () => sessionIds[sessionIndex++ % sessionIds.length];
 
 const chunkMessage = (text, max = 1900) => {
   const chunks = [];
-  for (let i = 0; i < text.length; i += max) {
-    chunks.push(text.slice(i, i + max));
-  }
+  for (let i = 0; i < text.length; i += max) chunks.push(text.slice(i, i + max));
   return chunks;
 };
 
@@ -94,23 +90,30 @@ module.exports = {
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const imageUrl = toolCall.result?.match(/https?:\/\/[^\s)]+/g)?.[0];
-          if (imageUrl) {
-            await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`, {
-              recipient: { id: senderId },
-              message: {
-                attachment: {
-                  type: 'image',
-                  payload: {
-                    url: imageUrl,
-                    is_reusable: false
-                  }
-                }
-              }
-            });
-          } else {
-            await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
-          }
+          const match = toolCall.result.match(/https?:\/\/[^\s)]+/);
+          if (!match) break;
+
+          const imageUrl = match[0];
+          const tmpPath = path.join(__dirname, `tmp_${Date.now()}.jpg`);
+          const img = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+          fs.writeFileSync(tmpPath, Buffer.from(img.data));
+
+          const form = new FormData();
+          form.append('message', JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }));
+          form.append('filedata', fs.createReadStream(tmpPath));
+
+          const upload = await axios.post(
+            `https://graph.facebook.com/v23.0/me/message_attachments?access_token=${pageAccessToken}`,
+            form, { headers: form.getHeaders() }
+          );
+
+          const attachmentId = upload.data.attachment_id;
+          await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`, {
+            recipient: { id: senderId },
+            message: { attachment: { type: 'image', payload: { attachment_id: attachmentId } } }
+          });
+
+          fs.unlinkSync(tmpPath);
           return;
         }
 
