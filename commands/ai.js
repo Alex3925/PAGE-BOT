@@ -107,6 +107,22 @@ module.exports = {
         }
       }
 
+      // ✅ Clean and send direct image preview if found
+      const match = fullResponseText.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s")\]]+/);
+      if (match) {
+        const cleanUrl = match[0].replace(/[)\]]+$/, '');
+        await sendMessage(senderId, {
+          attachment: {
+            type: 'image',
+            payload: {
+              url: cleanUrl,
+              is_reusable: true
+            }
+          }
+        }, pageAccessToken);
+        return;
+      }
+
       if (!fullResponseText) throw new Error('Empty response from AI.');
 
       const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
