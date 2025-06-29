@@ -11,8 +11,7 @@ const getImageUrl = async (event, token) => {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
     });
-    const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
-    return imageUrl;
+    return data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
   } catch (err) {
     console.error("Image URL fetch error:", err?.response?.data || err.message);
     return null;
@@ -70,7 +69,6 @@ module.exports = {
     try {
       const imageUrl = await getImageUrl(event, pageAccessToken);
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
-
       if (conversationHistory[senderId].length > MAX_HISTORY) {
         conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
       }
@@ -92,19 +90,39 @@ module.exports = {
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
 
-      const streamed = textData.match(/0:\"(.*?)\"/g);
+      const streamed = textData.match(/0:"(.*?)"/g);
       const fullResponseText = streamed?.map(t => t.slice(3, -1).replace(/\\n/g, '\n')).join('') || '';
 
-      const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
+      let toolCalls = data?.choices?.[0]?.message?.toolInvocations;
+
+      // Fallback: Try to extract toolInvocations from raw text
+      if (!toolCalls || !Array.isArray(toolCalls)) {
+        try {
+          const parsed = JSON.parse(textData);
+          toolCalls = parsed?.toolInvocations || [];
+        } catch { /* ignore parse failure */ }
+      }
 
       if (fullResponseText) {
         conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
       }
 
-      if (toolCalls.length > 0) {
-        const finalReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
-        await sendMessage(senderId, { text: finalReply }, pageAccessToken);
-        return;
+      for (const toolCall of toolCalls || []) {
+        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
+          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
+          return;
+        }
+
+        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
+          await sendMessage(senderId, { text: `📷 Image analysis result:\n${toolCall.result}` }, pageAccessToken);
+          return;
+        }
+
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
+          const reply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
+          await sendMessage(senderId, { text: reply }, pageAccessToken);
+          return;
+        }
       }
 
       if (!fullResponseText) throw new Error('Empty response from AI.');
