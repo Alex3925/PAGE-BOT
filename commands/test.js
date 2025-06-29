@@ -3,15 +3,33 @@ const fs = require('fs');
 const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
-const getImageUrl = async (event, token) => {
+// Image cache: stores last image URL per sender
+const imageCache = new Map();
+const IMAGE_EXPIRY = 5 * 60 * 1000; // 5 minutes
+
+const getImageUrl = async (event, token, senderId) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
-  if (!mid) return null;
+
+  // Fallback to cache if not replying
+  if (!mid) {
+    const cached = imageCache.get(senderId);
+    if (cached && Date.now() - cached.timestamp < IMAGE_EXPIRY) {
+      console.log(`Using cached image for sender ${senderId}`);
+      return cached.url;
+    } else {
+      imageCache.delete(senderId);
+      return null;
+    }
+  }
 
   try {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
     });
     const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
+    if (imageUrl) {
+      imageCache.set(senderId, { url: imageUrl, timestamp: Date.now() });
+    }
     return imageUrl;
   } catch (err) {
     console.error("Image URL fetch error:", err?.response?.data || err.message);
@@ -53,15 +71,26 @@ module.exports = {
     const prompt = args.join(' ').trim() || 'Hello';
     const chatSessionId = sessionIds[sessionIndex++ % sessionIds.length];
 
+    // Cache any image in attachments
+    const attachments = event?.message?.attachments || [];
+    for (const attachment of attachments) {
+      if (attachment.type === 'image' && attachment.payload?.url) {
+        console.log(`Caching image for sender ${senderId}: ${attachment.payload.url}`);
+        imageCache.set(senderId, {
+          url: attachment.payload.url,
+          timestamp: Date.now()
+        });
+      }
+    }
+
     const headers = {
       "content-type": "application/json",
-      "referer": "https://digitalprotg-32922.chipp.ai/w/chat/",
       "origin": "https://digitalprotg-32922.chipp.ai",
-      "cookie": "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8"
+      "referer": "https://digitalprotg-32922.chipp.ai/w/chat/"
     };
 
     try {
-      const imageUrl = await getImageUrl(event, pageAccessToken);
+      const imageUrl = await getImageUrl(event, pageAccessToken, senderId);
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
 
       if (conversationHistory[senderId].length > MAX_HISTORY) {
@@ -84,14 +113,15 @@ module.exports = {
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
-      const streamed = textData.match(/0:"(.*?)"/g);
+
+      const streamed = textData.match(/0:\"(.*?)\"/g);
       const fullResponseText = streamed?.map(t => t.slice(3, -1).replace(/\\n/g, '\n')).join('') || '';
+
+      const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
 
       if (fullResponseText) {
         conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
       }
-
-      const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
@@ -100,7 +130,7 @@ module.exports = {
         }
 
         if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
+          await sendMessage(senderId, { text: `📷 Image analysis result:\n${toolCall.result}` }, pageAccessToken);
           return;
         }
       }
