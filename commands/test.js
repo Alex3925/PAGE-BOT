@@ -107,11 +107,19 @@ module.exports = {
         }
       }
 
-      // ✅ Clean and send direct image URL if detected
+      // ✅ Clean and send direct image preview if found
       const match = fullResponseText.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s")\]]+/);
       if (match) {
-        const cleanUrl = match[0].replace(/[)\]]+$/, ''); // Remove trailing ) or ]
-        await sendMessage(senderId, { text: cleanUrl }, pageAccessToken);
+        const cleanUrl = match[0].replace(/[)\]]+$/, '');
+        await sendMessage(senderId, {
+          attachment: {
+            type: 'image',
+            payload: {
+              url: cleanUrl,
+              is_reusable: true
+            }
+          }
+        }, pageAccessToken);
         return;
       }
 
