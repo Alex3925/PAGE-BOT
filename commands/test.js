@@ -6,7 +6,6 @@ const { sendMessage } = require('../handles/sendMessage');
 const getImageUrl = async (event, token) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
   if (!mid) return null;
-
   try {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
@@ -78,47 +77,46 @@ module.exports = {
       }
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
-      const responseText = Array.isArray(data)
-        ? data.map(d => d['0']).join('')
-        : typeof data === 'string'
-        ? data
-        : JSON.stringify(data);
 
-      const assistantReply = responseText
-        .split('\n')
-        .map(l => l.replace(/^0:\"/, '').replace(/\"$/, '').replace(/\\n/g, '\n'))
-        .join('')
-        .trim();
+      const raw = typeof data === 'string' ? data : JSON.stringify(data);
+      const responseTextChunks = raw.match(/0:"(.*?)"/g)?.map(x => x.slice(3, -1).replace(/\\n/g, '\n')) || [];
+      const fullResponseText = responseTextChunks.join('');
 
-      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
+      const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
 
+      // store real assistant response in history
+      if (fullResponseText) {
+        conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
+      }
+
+      // process tool result
       for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
+        const { toolName, result, state } = toolCall;
+        if (state !== 'result') continue;
+
+        if (toolName === 'generateImage' && result) {
+          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${result}` }, pageAccessToken);
           return;
         }
 
-        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `🧠 Image analysis:\n${toolCall.result}` }, pageAccessToken);
+        if (toolName === 'analyzeImage' && result) {
+          await sendMessage(senderId, { text: `Image analysis result: ${result}` }, pageAccessToken);
           return;
         }
 
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
-          if (assistantReply) {
-            await sendMessage(senderId, { text: `💬 | Mocha Ai\n・───────────・\n${assistantReply}\n・──── >ᴗ< ────・` }, pageAccessToken);
-            return;
-          } else {
-            await sendMessage(senderId, { text: `❎ | No assistant response.` }, pageAccessToken);
-            return;
+        if (toolName === 'browseWeb') {
+          // Only send the assistant reply — ignore snippets/links
+          const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
+          for (const chunk of chunkMessage(formatted)) {
+            await sendMessage(senderId, { text: chunk }, pageAccessToken);
           }
+          return;
         }
       }
 
-      if (!assistantReply) throw new Error('No AI reply received.');
+      if (!fullResponseText) throw new Error('Empty response from AI.');
 
-      conversationHistory[senderId].push({ role: 'assistant', content: assistantReply });
-
-      const formatted = `💬 | Mocha Ai\n・───────────・\n${assistantReply}\n・──── >ᴗ< ────・`;
+      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
       for (const chunk of chunkMessage(formatted)) {
         await sendMessage(senderId, { text: chunk }, pageAccessToken);
       }
