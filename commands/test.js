@@ -94,14 +94,8 @@ module.exports = {
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const imageUrl = toolCall.result.trim();
-          if (imageUrl.startsWith('https://storage.googleapis.com/chipp-images/chat-image-generations')) {
-            await sendMessage(senderId, { text: imageUrl }, pageAccessToken);
-            return;
-          } else {
-            await sendMessage(senderId, { text: `🖼️ Generated Image:\n${imageUrl}` }, pageAccessToken);
-            return;
-          }
+          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
+          return;
         }
 
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
@@ -111,6 +105,13 @@ module.exports = {
           await sendMessage(senderId, { text: finalReply }, pageAccessToken);
           return;
         }
+      }
+
+      // 🆕 Check for direct image URL
+      const match = fullResponseText.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s"]+/);
+      if (match) {
+        await sendMessage(senderId, { text: match[0] }, pageAccessToken);
+        return;
       }
 
       if (!fullResponseText) throw new Error('Empty response from AI.');
