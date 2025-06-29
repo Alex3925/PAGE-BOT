@@ -47,7 +47,7 @@ const MAX_HISTORY = 20;
 const KEEP_RECENT = 12;
 
 module.exports = {
-  name: 'ai',
+  name: 'test',
   description: 'Interact with Mocha AI using text queries.',
   usage: 'ask a question, optionally with image',
   author: 'coffee',
