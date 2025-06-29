@@ -63,7 +63,7 @@ module.exports = {
       'content-type': 'application/json',
       'origin': 'https://digitalprotg-32922.chipp.ai',
       'referer': 'https://digitalprotg-32922.chipp.ai/w/chat/',
-      'cookie': '__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8'
+      'cookie': '__Host-next-auth.csrf-token=...; userId_70381=...; correlationId=...'
     };
 
     try {
@@ -81,63 +81,47 @@ module.exports = {
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
-      const textResponse = Array.isArray(data?.choices?.[0]?.message?.parts)
-        ? data.choices[0].message.parts.map(p => p.text).join('\n').trim()
-        : '';
-
       const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
+      let finalResponse = '';
 
-      if (textResponse) {
-        conversationHistory[senderId].push({ role: 'assistant', content: textResponse });
+      // Extract text parts from assistant response
+      if (Array.isArray(data?.choices?.[0]?.message?.parts)) {
+        finalResponse = data.choices[0].message.parts
+          .filter(p => p.type === 'text')
+          .map(p => p.text)
+          .join('\n')
+          .trim();
       }
 
-      // Handle tool calls
+      // Extract text response from browseWeb tool if available
       for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const url = toolCall.result.trim().replace(/[)\]]+$/, '');
-          await sendMessage(senderId, {
-            attachment: {
-              type: 'image',
-              payload: {
-                url,
-                is_reusable: true
-              }
-            }
-          }, pageAccessToken);
-          return;
-        }
-
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
-          const browseText = Array.isArray(data?.choices?.[0]?.message?.parts)
-            ? data.choices[0].message.parts.map(p => p.text).join('\n').trim()
-            : 'No response.';
-
-          await sendMessage(senderId, {
-            text: `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${browseText}\n・──── >ᴗ< ────・`
-          }, pageAccessToken);
-          return;
+          const parts = data.choices[0].message.parts;
+          const browseWebText = parts.find(p => p.type === 'text')?.text;
+          if (browseWebText) finalResponse = browseWebText;
         }
       }
 
-      // If the response contains a chipp-generated image URL, send preview
-      const match = textResponse.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s)\]]+/);
+      if (finalResponse) {
+        conversationHistory[senderId].push({ role: 'assistant', content: finalResponse });
+      }
+
+      // Check for chipp image URL in response
+      const match = finalResponse.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^
+\s)\]]+/);
       if (match) {
-        const cleanUrl = match[0].replace(/[)\]]+$/, '');
         await sendMessage(senderId, {
           attachment: {
             type: 'image',
-            payload: {
-              url: cleanUrl,
-              is_reusable: true
-            }
+            payload: { url: match[0].replace(/[)\]]+$/, ''), is_reusable: true }
           }
         }, pageAccessToken);
         return;
       }
 
-      if (!textResponse) throw new Error('Empty response from AI.');
+      if (!finalResponse) throw new Error('Empty response from AI.');
 
-      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${textResponse}\n・──── >ᴗ< ────・`;
+      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${finalResponse}\n・──── >ᴗ< ────・`;
       for (const chunk of chunkMessage(formatted)) {
         await sendMessage(senderId, { text: chunk }, pageAccessToken);
       }
