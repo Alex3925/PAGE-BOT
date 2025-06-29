@@ -1,7 +1,22 @@
 const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
+
+const sessionIds = [
+  "ba1a5c15-867a-4caa-b91d-d5ef01503aeb",
+  "448379a9-521d-4a50-9c9a-47e7a9b0227b",
+  "6417e57c-ac9f-4b8c-b3bd-1b03c0ddbd49",
+  "07ac79aa-177c-4ed9-a5cd-fa87bda63831",
+  "e10a6247-623f-4337-8cd0-bc98972c487f",
+  "fc053908-a0f3-4a9c-ad4a-008105dcc360",
+  "a14da8a4-6566-45bd-b589-0f3dff2a1779"
+];
+let sessionIndex = 0;
+
+const getNextSessionId = () => {
+  const id = sessionIds[sessionIndex];
+  sessionIndex = (sessionIndex + 1) % sessionIds.length;
+  return id;
+};
 
 const getImageUrl = async (event, token) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
@@ -9,12 +24,11 @@ const getImageUrl = async (event, token) => {
 
   try {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
-      params: { access_token: token },
+      params: { access_token: token }
     });
-    const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
-    return imageUrl;
+    return data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
   } catch (err) {
-    console.error("Image URL fetch error:", err?.response?.data || err.message);
+    console.error('Image fetch error:', err?.response?.data || err.message);
     return null;
   }
 };
@@ -28,38 +42,28 @@ const chunkMessage = (text, max = 1900) => {
 };
 
 const conversationHistory = {};
-const MAX_HISTORY = 20; // absolute max before trimming
-const KEEP_RECENT = 12; // keep most recent exchanges
+const MAX_HISTORY = 20;
+const KEEP_RECENT = 12;
 
 module.exports = {
   name: 'test',
-  description: 'Interact with Mocha AI using text queries and image analysis',
+  description: 'Interact with Mocha AI using text queries and image analysis.',
   usage: 'ask a question, or reply to an image with your question.',
   author: 'Coffee',
 
-  async execute(senderId, args, pageAccessToken, event) {
+  async execute(senderId, args, pageAccessToken, event, sendMessage, imageCache) {
     const prompt = args.join(' ').trim() || 'Hello';
-    const chatSessionId = "fc053908-a0f3-4a9c-ad4a-008105dcc360";
+    const chatSessionId = getNextSessionId();
 
     const headers = {
-      "content-type": "application/json",
-      "sec-ch-ua-platform": "\"Android\"",
-      "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
-      "sec-ch-ua": "\"Chromium\";v=\"136\", \"Brave\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
-      "sec-ch-ua-mobile": "?1",
-      "accept": "*/*",
-      "sec-gpc": "1",
-      "accept-language": "en-US,en;q=0.9",
-      "origin": "https://digitalprotg-32922.chipp.ai",
-      "referer": "https://digitalprotg-32922.chipp.ai/w/chat/",
-      "cookie": "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8",
+      'content-type': 'application/json',
+      'origin': 'https://digitalprotg-32922.chipp.ai',
+      'referer': 'https://digitalprotg-32922.chipp.ai/w/chat/',
+      'cookie': '__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8'
     };
 
     try {
-      const imageUrl = await getImageUrl(event, pageAccessToken);
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
-
-      // Manage history limit smoothly
       if (conversationHistory[senderId].length > MAX_HISTORY) {
         conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
       }
@@ -70,6 +74,13 @@ module.exports = {
         chatSessionId,
         messages: conversationHistory[senderId],
       };
+
+      // Attempt to fetch image from message or fallback to cache
+      let imageUrl = await getImageUrl(event, pageAccessToken);
+      const cached = imageCache?.get(senderId);
+      if (!imageUrl && cached && Date.now() - cached.timestamp <= 5 * 60 * 1000) {
+        imageUrl = cached.url;
+      }
 
       if (imageUrl) {
         payload.toolInvocations = [{
