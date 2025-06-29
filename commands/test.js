@@ -28,8 +28,8 @@ const chunkMessage = (text, max = 1900) => {
 };
 
 const conversationHistory = {};
-const MAX_HISTORY = 20; // absolute max before trimming
-const KEEP_RECENT = 12; // keep most recent exchanges
+const MAX_HISTORY = 20;
+const KEEP_RECENT = 12;
 
 module.exports = {
   name: 'test',
@@ -59,7 +59,6 @@ module.exports = {
       const imageUrl = await getImageUrl(event, pageAccessToken);
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
 
-      // Manage history limit smoothly
       if (conversationHistory[senderId].length > MAX_HISTORY) {
         conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
       }
@@ -79,17 +78,21 @@ module.exports = {
       }
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
+      const responseText = Array.isArray(data)
+        ? data.map(d => d['0']).join('')
+        : typeof data === 'string'
+        ? data
+        : JSON.stringify(data);
 
-      const textData = typeof data === 'string' ? data : JSON.stringify(data);
-      const responseTextChunks = textData.match(/"result":"(.*?)"/g)?.map(c => c.slice(10, -1).replace(/\\n/g, '\n')) ||
-                                 textData.match(/0:"(.*?)"/g)?.map(c => c.slice(3, -1).replace(/\\n/g, '\n')) || [];
+      const assistantReply = responseText.match(/(?:^|[^\\])"(?:[^"]*?)(?:Here)?(?:[^"]*?)\n?\d?\.\s\*\*(.*?)\*\*/g)
+        ? responseText
+        : responseText
+            .split('\n')
+            .map(l => l.replace(/^0:"/, '').replace(/"$/, '').replace(/\\n/g, '\n'))
+            .join('')
+            .trim();
 
-      const fullResponseText = responseTextChunks.join('');
       const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
-
-      if (fullResponseText) {
-        conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
-      }
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
@@ -98,22 +101,23 @@ module.exports = {
         }
 
         if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
+          await sendMessage(senderId, { text: `🧠 Image analysis:\n${toolCall.result}` }, pageAccessToken);
           return;
         }
 
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
-          const snippets = toolCall.result.answerBox?.answer ||
-            toolCall.result.organic?.map(o => o.snippet).filter(Boolean).join('\n\n') || 'No relevant info found.';
-          const finalReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n\nBrowse result:\n${snippets}\n・──── >ᴗ< ────・`;
-          await sendMessage(senderId, { text: finalReply }, pageAccessToken);
+          const snippets = toolCall.result.organic?.map(o => o.snippet).join('\n\n') || 'No relevant info found.';
+          const finalReply = assistantReply || snippets;
+          await sendMessage(senderId, { text: `💬 | Mocha Ai\n・───────────・\n${finalReply}\n・──── >ᴗ< ────・` }, pageAccessToken);
           return;
         }
       }
 
-      if (!fullResponseText) throw new Error('Empty response from AI.');
+      if (!assistantReply) throw new Error('No AI reply received.');
 
-      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
+      conversationHistory[senderId].push({ role: 'assistant', content: assistantReply });
+
+      const formatted = `💬 | Mocha Ai\n・───────────・\n${assistantReply}\n・──── >ᴗ< ────・`;
       for (const chunk of chunkMessage(formatted)) {
         await sendMessage(senderId, { text: chunk }, pageAccessToken);
       }
