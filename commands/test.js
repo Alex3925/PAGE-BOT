@@ -1,7 +1,6 @@
 const axios = require('axios');
 const { sendMessage } = require('../handles/sendMessage');
 
-// Reusable image fetcher from reply or cache
 const getImageUrl = async (event, token, cache) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
   if (mid) {
@@ -15,7 +14,7 @@ const getImageUrl = async (event, token, cache) => {
     }
   }
   const c = cache?.get(event.sender.id);
-  return c && Date.now() - c.timestamp < 3e5 ? c.url : null;
+  return c && Date.now() - c.timestamp < 300000 ? c.url : null;
 };
 
 const sessionIds = [
@@ -49,13 +48,16 @@ const KEEP_RECENT = 12;
 
 module.exports = {
   name: 'test',
-  description: 'Interact with Mocha AI using text queries and image analysis.',
-  usage: 'ask a question, or reply to an image with your question.',
+  description: 'Interact with Mocha AI using text queries.',
+  usage: 'ask a question, optionally with image',
   author: 'coffee',
 
   async execute(senderId, args, pageAccessToken, event, sendMessage, imageCache) {
-    const prompt = args.join(' ').trim() || 'Hello';
+    const rawPrompt = args.join(' ').trim() || 'Hello';
     const chatSessionId = getNextSessionId();
+
+    const imageUrl = await getImageUrl(event, pageAccessToken, imageCache);
+    const prompt = imageUrl ? `${rawPrompt}\n\nImage URL: ${imageUrl}` : rawPrompt;
 
     const headers = {
       'content-type': 'application/json',
@@ -77,15 +79,6 @@ module.exports = {
         messages: conversationHistory[senderId]
       };
 
-      // 🔁 Always try to get image from reply or cache
-      const imageUrl = await getImageUrl(event, pageAccessToken, imageCache);
-      if (imageUrl) {
-        payload.toolInvocations = [{
-          toolName: 'analyzeImage',
-          args: { userQuery: prompt, imageUrls: [imageUrl] }
-        }];
-      }
-
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
@@ -102,11 +95,6 @@ module.exports = {
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
           await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
-          return;
-        }
-
-        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
           return;
         }
 
