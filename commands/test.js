@@ -1,157 +1,193 @@
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const FormData = require('form-data');
-const { sendMessage } = require('../handles/sendMessage');
+const axios = require('axios'); const fs = require('fs'); const path = require('path'); const FormData = require('form-data'); const { sendMessage } = require('../handles/sendMessage');
+const getImageUrl = async (event, token) => { const mid = event?.message?.reply_to?.mid || event?.message?.mid; if (!mid) return null;
+try { const { data } = await axios.get(https://graph.facebook.com/v23.0/${mid}/attachments, { params: { access_token: token } });
+const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;  
+return imageUrl; 
 
-const imageCache = new Map();
+} catch (err) { console.error("Image URL fetch error:", err?.response?.data || err.message); return null; } };
+const conversationHistory = {};
 
-const getImageUrl = async (event, token, senderId) => {
-  const mid = event?.message?.reply_to?.mid || event?.message?.mid;
-  if (!mid) return null;
+module.exports = { name: 'test', description: 'Interact with Mocha AI using text queries and image analysis', usage: 'ask a question, or send a reply question to an image.', author: 'Coffee',
 
-  try {
-    const { data } = await axios.get(`https://graph.facebook.com/v22.0/${mid}/attachments`, {
-      params: { access_token: token }
-    });
-    const file = data?.data?.[0];
-    const url = file?.image_data?.url || file?.file_url || null;
+async execute(senderId, args, pageAccessToken, event) { const prompt = args.join(' ').trim() || 'Hello'; 
 
-    if (url) imageCache.set(senderId, { url, timestamp: Date.now() });
-    return url;
-  } catch (e) {
-    console.error("Image fetch error:", e?.response?.data || e.message);
-    return null;
-  }
-};
+const chatSessionId = "fc053908-a0f3-4a9c-ad4a-008105dcc360";
 
-const downloadAndSendImage = async (imageUrl, senderId, token) => {
-  const filePath = path.join(__dirname, 'tmp_image.jpg');
-  try {
-    const img = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    fs.writeFileSync(filePath, Buffer.from(img.data));
+const headers = {  
+  "content-type": "application/json",  
+  "sec-ch-ua-platform": "\"Android\"",  
+  "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",  
+  "sec-ch-ua": "\"Chromium\";v=\"136\", \"Brave\";v=\"136\", \"Not.A/Brand\";v=\"99\"",  
+  "sec-ch-ua-mobile": "?1",  
+  "accept": "*/*",  
+  "sec-gpc": "1",  
+  "accept-language": "en-US,en;q=0.9",  
+  "origin": "https://digitalprotg-32922.chipp.ai",  
+  "sec-fetch-site": "same-origin",  
+  "sec-fetch-mode": "cors",  
+  "sec-fetch-dest": "empty",  
+  "referer": "https://digitalprotg-32922.chipp.ai/w/chat/",  
+  "accept-encoding": "gzip, deflate, br, zstd",  
+  "cookie": "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8",  
+  "priority": "u=1, i"  
 
-    const form = new FormData();
-    form.append('message', JSON.stringify({ attachment: { type: 'image', payload: { is_reusable: true } } }));
-    form.append('filedata', fs.createReadStream(filePath));
+};  
 
-    const upload = await axios.post(
-      `https://graph.facebook.com/v17.0/me/message_attachments?access_token=${token}`,
-      form, { headers: form.getHeaders() }
-    );
+try {  
+  if (!conversationHistory[senderId]) {  
+    conversationHistory[senderId] = [];  
+  }  
 
-    const attachmentId = upload.data.attachment_id;
-    await axios.post(
-      `https://graph.facebook.com/v17.0/me/messages?access_token=${token}`,
-      {
-        recipient: { id: senderId },
-        message: { attachment: { type: 'image', payload: { attachment_id: attachmentId } } }
-      }
-    );
-  } catch (err) {
-    console.error('Image upload error:', err.message);
-    await sendMessage(senderId, { text: '❎ Failed to send generated image.' }, token);
-  } finally {
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-  }
-};
+  conversationHistory[senderId].push({ role: 'user', content: prompt });  
 
-module.exports = {
-  name: 'test',
-  description: 'Mocha AI chat via Chipp, each user has own conversation',
-  usage: 'Send message, reply to image, or say "generate ..."',
-  author: 'Coffee',
+  const chunkMessage = (message, maxLength) => {  
+    const chunks = [];  
+    for (let i = 0; i < message.length; i += maxLength) {  
+      chunks.push(message.slice(i, i + maxLength));  
+    }  
+    return chunks;  
+  };  
 
-  async execute(senderId, args, token, event) {
-    const prompt = args.join(' ').trim() || 'Hello';
-    const appNameId = 'DigitalProtg-32922';
-    const chatSessionId = senderId;
+  const imageUrl = await getImageUrl(event, pageAccessToken);  
 
-    const imageUrl = await getImageUrl(event, token, senderId)
-      || (imageCache.get(senderId)?.timestamp > Date.now() - 300000 ? imageCache.get(senderId).url : null);
+  let payload;  
 
-    const userMessage = imageUrl ? `${prompt}\nImage URL: ${imageUrl}` : prompt;
-    const isGenerate = /^generate\b/i.test(prompt);
+  if (imageUrl) {  
+    const combinedPrompt = `${prompt}\nImage URL: ${imageUrl}`;  
+    payload = {  
+      messages: [...conversationHistory[senderId], { role: 'user', content: combinedPrompt }],  
+      chatSessionId,  
+      toolInvocations: [  
+        {  
+          toolName: 'analyzeImage',  
+          args: {  
+            userQuery: prompt,  
+            imageUrls: [imageUrl],  
+          }  
+        }  
+      ]  
+    };  
+  } else {  
+    payload = {  
+      messages: [...conversationHistory[senderId]],  
+      chatSessionId,  
+    };  
+  }  
 
-    const headers = {
-      "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
-      "Referer": "https://digitalprotg-32922.chipp.ai/w/chat/",
-      "Origin": "https://digitalprotg-32922.chipp.ai",
-      "x-where-the-chat-is-being-viewed": "CONSUMER_VIEW",
-      "Accept": "application/json, text/plain, */*",
-      "Cookie": [
-        "__Host-authjs.csrf-token=582e72dfce35596f5f80d697e4399711c206c6acaa1c34209360529e53932270%7Ccaeaa4d1798ea17ff6c25c93b0357a63f49846a280cb80c3a541ef523e2cdd16",
-        "__Secure-authjs.callback-url=https%3A%2F%2Fapp.chipp.ai",
-        `userId_32922=${senderId}`,
-        `chatSessionId_32922=${senderId}`,
-        "correlationId=48394f13-eb27-4f86-8d77-e467c6aa1789"
-      ].join('; ')
-    };
+  const { data } = await axios.post("https://newapplication-70381.chipp.ai/api/chat", payload, { headers });  
 
-    try {
-      const chatHistoryRes = await axios.get(
-        `https://digitalprotg-32922.chipp.ai/w/chat/api/chat-history/chat-sessions-for-user`,
-        {
-          params: { id: chatSessionId, appNameId },
-          headers
-        }
-      );
+  // The response from the API may be a string or an object - adjust accordingly:  
+  const textData = typeof data === 'string' ? data : JSON.stringify(data);  
 
-      const history = (chatHistoryRes.data?.messages || []).map(m => ({
-        role: m.senderType === 'USER' ? 'user' : 'assistant',
-        content: m.content
-      }));
+  const responseTextChunks = textData.match(/"result":"(.*?)"/g)?.map(chunk => chunk.slice(10, -1).replace(/\\n/g, '\n'))   
+    || textData.match(/0:"(.*?)"/g)?.map(chunk => chunk.slice(3, -1).replace(/\\n/g, '\n')) || [];  
 
-      history.push({ role: 'user', content: userMessage });
+  const fullResponseText = responseTextChunks.join('');  
+  const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];  
 
-      const payload = {
-        chatSessionId,
-        messages: [...history],
-        ...(imageUrl && {
-          toolInvocations: [{
-            toolName: 'analyzeImage',
-            args: { userQuery: prompt, imageUrls: [imageUrl] }
-          }]
-        }),
-        ...(isGenerate && {
-          toolInvocations: [{
-            toolName: 'generateImage',
-            args: { prompt, n: 1 }
-          }]
-        })
-      };
+  // Process tool invocations  
+  for (const toolCall of toolCalls) {  
+    if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {  
+      try {  
+        // Extract markdown image URL and description  
+        const markdownMatch = toolCall.result.match(/!Generated Image:\s*(.*?)(https?:\/\/[^\s)]+)/i);  
+        if (!markdownMatch) throw new Error('Invalid image format in result.');  
 
-      const { data } = await axios.post("https://app.chipp.ai/api/chat", payload, { headers });
+        const description = markdownMatch[1];  
+        const imageUrl = markdownMatch[2];  
 
-      const tools = data?.choices?.[0]?.message?.toolInvocations || [];
-      for (const t of tools) {
-        if (t.state === 'result') {
-          if (t.toolName === 'generateImage') {
-            const urls = t?.result?.images || [];
-            for (const url of urls) await downloadAndSendImage(url, senderId, token);
-            return;
-          }
-          const msg = t?.result?.answerBox?.answer || t?.result;
-          if (msg) {
-            return sendMessage(senderId, {
-              text: `${t.toolName === 'browseWeb' ? 'Search result' : t.toolName === 'analyzeImage' ? 'Image analysis' : 'Tool result'}: ${msg}`
-            }, token);
-          }
-        }
-      }
+        // Download image to a temp file  
+        const tmpFilePath = path.join(__dirname, `tmp_${Date.now()}.jpg`);  
+        const response = await axios.get(imageUrl, { responseType: 'stream' });  
 
-      const fallback = data?.choices?.[0]?.message?.content
-        || (data.match?.(/"result":"(.*?)"/g) || []).map(r => r.slice(10, -1).replace(/\\n/g, '\n')).join('').trim();
+        const writer = fs.createWriteStream(tmpFilePath);  
+        response.data.pipe(writer);  
 
-      if (!fallback) throw new Error('No response returned.');
+        await new Promise((resolve, reject) => {  
+          writer.on('finish', resolve);  
+          writer.on('error', reject);  
+        });  
 
-      const reply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fallback}\n・──── >ᴗ< ────・`;
-      for (let i = 0; i < reply.length; i += 1900)
-        await sendMessage(senderId, { text: reply.slice(i, i + 1900) }, token);
+        // Prepare form data for Facebook upload  
+        const form = new FormData();  
+        form.append('message', JSON.stringify({  
+          attachment: {  
+            type: 'image',  
+            payload: { is_reusable: true }  
+          }  
+        }));  
+        form.append('filedata', fs.createReadStream(tmpFilePath));  
 
-    } catch (e) {
-      console.error('AI error:', e?.response?.data || e.message);
-      await sendMessage(senderId, { text: '❌ Error: Failed to get AI response.' }, token);
-    }
-  }
-};
+        // Upload image to Facebook to get attachment_id  
+        const uploadRes = await axios.post(  
+          `https://graph.facebook.com/v22.0/me/message_attachments?access_token=${pageAccessToken}`,  
+          form,  
+          { headers: form.getHeaders() }  
+        );  
+
+        const attachmentId = uploadRes.data.attachment_id;  
+
+        // Send the image attachment to the user  
+        await axios.post(  
+          `https://graph.facebook.com/v22.0/me/messages?access_token=${pageAccessToken}`,  
+          {  
+            recipient: { id: senderId },  
+            message: {  
+              attachment: {  
+                type: 'image',  
+                payload: { attachment_id: attachmentId }  
+              }  
+            }  
+          }  
+        );  
+
+        fs.unlinkSync(tmpFilePath);  
+
+      } catch (err) {  
+        console.error('ImageGen Error:', err.response?.data || err.message || err);  
+        await sendMessage(senderId, { text: '❎ | Failed to generate image. Please try again later.' }, pageAccessToken);  
+      }  
+
+      return;  
+    }  
+
+    if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {  
+      await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);  
+      return;  
+    }  
+
+    if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {  
+      let answerText = '';  
+      if (toolCall.result.answerBox && toolCall.result.answerBox.answer) {  
+        answerText = toolCall.result.answerBox.answer;  
+      } else if (Array.isArray(toolCall.result.organic)) {  
+        answerText = toolCall.result.organic.map(o => o.snippet).filter(Boolean).join('\n\n');  
+      }  
+
+      const finalReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n\nBrowse result:\n${answerText}\n・──── >ᴗ< ────・`;  
+      await sendMessage(senderId, { text: finalReply }, pageAccessToken);  
+      return;  
+    }  
+  }  
+
+  if (!fullResponseText) {  
+    throw new Error('Empty response from the AI.');  
+  }  
+
+  conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });  
+  const formattedResponse = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;  
+  const messageChunks = chunkMessage(formattedResponse, 1900);  
+  for (const chunk of messageChunks) {  
+    await sendMessage(senderId, { text: chunk }, pageAccessToken);  
+  }  
+
+} catch (err) {  
+  if (err.response && err.response.status === 400) {  
+    console.error("Bad Request: Ignored.");  
+  } else {  
+    console.error("Error:", err);  
+  }  
+} 
+
+},
+
