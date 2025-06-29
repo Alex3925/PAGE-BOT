@@ -6,6 +6,7 @@ const { sendMessage } = require('../handles/sendMessage');
 const getImageUrl = async (event, token) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
   if (!mid) return null;
+
   try {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
@@ -78,39 +79,34 @@ module.exports = {
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
-      const raw = typeof data === 'string' ? data : JSON.stringify(data);
-      const responseTextChunks = raw.match(/0:"(.*?)"/g)?.map(x => x.slice(3, -1).replace(/\\n/g, '\n')) || [];
-      const fullResponseText = responseTextChunks.join('');
+      // 🧠 Extract only 0:"..." lines (real assistant reply)
+      const textData = typeof data === 'string' ? data : JSON.stringify(data);
+      const responseTextChunks = textData
+        .split('\n')
+        .filter(line => line.startsWith('0:'))
+        .map(line => line.slice(2).replace(/^"+|"+$/g, '').replace(/\\n/g, '\n').replace(/\\"/g, '"'));
 
-      const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
+      const fullResponseText = responseTextChunks.join('').trim();
+      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
 
-      // store real assistant response in history
       if (fullResponseText) {
         conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
       }
 
-      // process tool result
       for (const toolCall of toolCalls) {
-        const { toolName, result, state } = toolCall;
-        if (state !== 'result') continue;
-
-        if (toolName === 'generateImage' && result) {
-          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${result}` }, pageAccessToken);
+        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
+          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
           return;
         }
 
-        if (toolName === 'analyzeImage' && result) {
-          await sendMessage(senderId, { text: `Image analysis result: ${result}` }, pageAccessToken);
+        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
+          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
           return;
         }
 
-        if (toolName === 'browseWeb') {
-          // Only send the assistant reply — ignore snippets/links
-          const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
-          for (const chunk of chunkMessage(formatted)) {
-            await sendMessage(senderId, { text: chunk }, pageAccessToken);
-          }
-          return;
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
+          // skip appending any `toolCall.result.*`, we now only use assistant reply
+          break;
         }
       }
 
