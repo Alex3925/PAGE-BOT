@@ -52,7 +52,7 @@ module.exports = {
       "accept-language": "en-US,en;q=0.9",
       "origin": "https://digitalprotg-32922.chipp.ai",
       "referer": "https://digitalprotg-32922.chipp.ai/w/chat/",
-      "cookie": "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8",
+      "cookie": "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8"
     };
 
     try {
@@ -79,45 +79,37 @@ module.exports = {
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
-      // Extract assistant reply from all `0:"..."` lines
+      // Parse raw response for assistant reply lines like 0:"..."
       const lines = typeof data === 'string' ? data.split('\n') : [];
-      const realReply = lines
+      let realReply = lines
         .filter(l => l.trim().startsWith('0:'))
-        .map(l => l.replace(/^0:"|",$|^0:"|^0:|^"|"$/g, '').replace(/\\n/g, '\n'))
-        .join('');
+        .map(l => l.replace(/^0:"|",$|^0:|^"|"$/g, '').replace(/\\n/g, '\n'))
+        .join('')
+        .trim();
 
-      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
+      // Fallback: extract answerBox.answer from browseWeb if available
+      if (!realReply && Array.isArray(data.toolInvocations)) {
+        const browseResult = data.toolInvocations.find(t =>
+          t.toolName === 'browseWeb' && t.state === 'result' && t.result?.answerBox?.answer
+        );
+        if (browseResult) {
+          realReply = browseResult.result.answerBox.answer;
+        }
+      }
 
       if (realReply) {
         conversationHistory[senderId].push({ role: 'assistant', content: realReply });
+        for (const chunk of chunkMessage(realReply)) {
+          await sendMessage(senderId, { text: chunk }, pageAccessToken);
+        }
+        return;
       }
 
-      for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
-          return;
-        }
-
-        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
-          return;
-        }
-
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
-          // Now ignored completely — only `realReply` will be shown
-          break;
-        }
-      }
-
-      if (!realReply) throw new Error('Empty response from AI.');
-
-      for (const chunk of chunkMessage(realReply)) {
-        await sendMessage(senderId, { text: chunk }, pageAccessToken);
-      }
+      throw new Error('Empty response from AI.');
 
     } catch (err) {
       console.error('AI Command Error:', err?.response?.data || err.message || err);
       await sendMessage(senderId, { text: '❎ | An error occurred. Please try again later.' }, pageAccessToken);
     }
-  },
+  }
 };
