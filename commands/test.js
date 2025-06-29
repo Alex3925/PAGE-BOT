@@ -94,18 +94,23 @@ module.exports = {
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`, {
-            recipient: { id: senderId },
-            message: {
-              attachment: {
-                type: 'image',
-                payload: {
-                  url: toolCall.result,
-                  is_reusable: false
+          const imageUrl = toolCall.result?.match(/https?:\/\/[^\s)]+/g)?.[0];
+          if (imageUrl) {
+            await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${pageAccessToken}`, {
+              recipient: { id: senderId },
+              message: {
+                attachment: {
+                  type: 'image',
+                  payload: {
+                    url: imageUrl,
+                    is_reusable: false
+                  }
                 }
               }
-            }
-          });
+            });
+          } else {
+            await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
+          }
           return;
         }
 
