@@ -100,6 +100,7 @@ module.exports = {
         messages: conversationHistory[senderId],
       };
 
+      // ✅ Always include image if available
       if (imageUrl) {
         payload.toolInvocations = [{
           toolName: 'analyzeImage',
