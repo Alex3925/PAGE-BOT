@@ -1,45 +1,40 @@
 const axios = require('axios');
+const cheerio = require('cheerio');
 const { sendMessage } = require('../handles/sendMessage');
 
-const API_KEY = '0bc1e20e-ec47-4c92-a61f-1c626e7edab7';
-
-const getImageUrl = async (event, token) => {
-  const mid = event?.message?.reply_to?.mid || event?.message?.mid;
-  if (!mid) return '';
-  try {
-    const res = await axios.get(`https://graph.facebook.com/v18.0/${mid}/attachments`, {
-      params: { access_token: token }
-    });
-    return res.data?.data?.[0]?.image_data?.url || res.data?.data?.[0]?.file_url || '';
-  } catch {
-    return '';
-  }
-};
-
 module.exports = {
-  name: 'gpt',
-  description: 'Chat with GPT-4o via Kaiz API',
-  usage: 'gpt [your message]',
-  author: 'Kaizenji',
+  name: 'test',
+  description: 'Chat with DuckDuckGo GPT-4o Mini',
+  usage: 'duckchat [message]',
+  author: 'Mark Sombra',
 
-  async execute(senderId, args, token, event, sendMessage, imageCache) {
-    const ask = args.join(' ').trim();
-    if (!ask) return sendMessage(senderId, { text: '❎ | Please enter a message.' }, token);
-
-    const cached = imageCache?.get(senderId);
-    const url = await getImageUrl(event, token) || (Date.now() - (cached?.timestamp || 0) < 300000 && cached.url) || '';
+  async execute(senderId, args, token, event, sendMessage) {
+    const input = args.join(' ').trim();
+    if (!input) return sendMessage(senderId, { text: '❎ | Please enter a message.' }, token);
 
     try {
-      const res = await axios.get('https://kaiz-apis.gleeze.com/api/gpt4o-latest', {
-        params: { ask, uid: senderId, imageUrl: url, apikey: API_KEY }
-      });
+      const res = await axios.post(
+        'https://duckduckgo.com/duckchat/v1/chat',
+        { model: 'gpt-4o-mini', messages: [{ role: 'user', content: input }] },
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0',
+            'Origin': 'https://duckduckgo.com',
+            'Referer': 'https://duckduckgo.com/chat',
+          }
+        }
+      );
 
-      const reply = res.data?.response;
-      if (!reply) return sendMessage(senderId, { text: '❎ | No response from GPT.' }, token);
+      const html = res.data?.output?.content;
+      if (!html) return sendMessage(senderId, { text: '❎ | No response from DuckDuckGo.' }, token);
 
-      const prefix = '💬 | GPT-4o (Kaiz)\n・───────────・\n';
+      const $ = cheerio.load(html);
+      const clean = $('body').text().trim() || $.text().trim();
+      const chunks = clean.match(/[\s\S]{1,1900}/g) || [clean];
+
+      const prefix = '💬 | 𝙳𝚞𝚌𝚔𝙲𝚑𝚊𝚝 GPT-4o Mini\n・───────────・\n';
       const suffix = '\n・──── >ᴗ< ────・';
-      const chunks = reply.match(/[\s\S]{1,1900}/g);
 
       for (let i = 0; i < chunks.length; i++) {
         await sendMessage(senderId, {
@@ -47,9 +42,10 @@ module.exports = {
         }, token);
         if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 500));
       }
+
     } catch (err) {
-      console.error('GPT error:', err?.response?.data || err.message);
-      sendMessage(senderId, { text: '❎ | Failed to connect to GPT service.' }, token);
+      console.error('DuckChat error:', err?.response?.data || err.message);
+      sendMessage(senderId, { text: '❎ | Failed to reach DuckDuckGo Chat.' }, token);
     }
   }
 };
