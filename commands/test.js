@@ -60,12 +60,11 @@ module.exports = {
       history[id].push({ role: 'assistant', content: output });
 
       for (const tool of tools) {
-        if (tool.toolName === 'generateImage' && tool.state === 'result')
-          return send(id, { text: tool.result }, token); // ✅ Only URL sent
-
+        if (tool.toolName === 'generateImage' && tool.state === 'result') {
+          return send(id, { text: `🖼️ Image:\n${tool.result}` }, token);
+        }
         if (tool.toolName === 'browseWeb' && tool.state === 'result') {
-          const info = tool.result.answerBox?.answer ||
-            tool.result.organic?.map(v => v.snippet).join('\n\n') || 'No info.';
+          const info = tool.result.answerBox?.answer || tool.result.organic?.map(v => v.snippet).join('\n\n') || 'No info.';
           return send(id, { text: `💬 | Mocha Ai\n─────────────\n${output}\n\nBrowse:\n${info}\n───── >ᴗ< ─────` }, token);
         }
       }
