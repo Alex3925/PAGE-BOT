@@ -94,12 +94,12 @@ module.exports = {
 
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const match = toolCall.result.match(/(https:\/\/[^)]+)/);
-          const imageUrlOnly = match?.[1];
-          if (imageUrlOnly) {
-            await sendMessage(senderId, { text: imageUrlOnly }, pageAccessToken);
+          const urlMatch = toolCall.result.match(/\bhttps:\/\/[^\s)]+/);
+          const imageUrl = urlMatch?.[0];
+          if (imageUrl) {
+            await sendMessage(senderId, { text: imageUrl }, pageAccessToken);
           } else {
-            await sendMessage(senderId, { text: '❎ | Failed to extract image URL.' }, pageAccessToken);
+            await sendMessage(senderId, { text: '❎ | Could not extract image URL.' }, pageAccessToken);
           }
           return;
         }
