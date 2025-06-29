@@ -31,6 +31,18 @@ const conversationHistory = {};
 const MAX_HISTORY = 20;
 const KEEP_RECENT = 12;
 
+const sessionIds = [
+  "ba1a5c15-867a-4caa-b91d-d5ef01503aeb",
+  "448379a9-521d-4a50-9c9a-47e7a9b0227b",
+  "6417e57c-ac9f-4b8c-b3bd-1b03c0ddbd49",
+  "07ac79aa-177c-4ed9-a5cd-fa87bda63831",
+  "e10a6247-623f-4337-8cd0-bc98972c487f",
+  "fc053908-a0f3-4a9c-ad4a-008105dcc360",
+  "348ce44e-eeed-49ad-b3e5-f4eca5069b4b"
+];
+
+let sessionIndex = 0;
+
 module.exports = {
   name: 'test',
   description: 'Interact with Mocha AI using text queries and image analysis',
@@ -39,7 +51,7 @@ module.exports = {
 
   async execute(senderId, args, pageAccessToken, event) {
     const prompt = args.join(' ').trim() || 'Hello';
-    const chatSessionId = "fc053908-a0f3-4a9c-ad4a-008105dcc360";
+    const chatSessionId = sessionIds[sessionIndex++ % sessionIds.length];
 
     const headers = {
       "content-type": "application/json",
@@ -52,7 +64,7 @@ module.exports = {
       "accept-language": "en-US,en;q=0.9",
       "origin": "https://digitalprotg-32922.chipp.ai",
       "referer": "https://digitalprotg-32922.chipp.ai/w/chat/",
-      "cookie": "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8"
+      "cookie": "__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8",
     };
 
     try {
@@ -78,38 +90,50 @@ module.exports = {
       }
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
+      const textData = typeof data === 'string' ? data : JSON.stringify(data);
 
-      // Parse raw response for assistant reply lines like 0:"..."
-      const lines = typeof data === 'string' ? data.split('\n') : [];
-      let realReply = lines
-        .filter(l => l.trim().startsWith('0:'))
-        .map(l => l.replace(/^0:"|",$|^0:|^"|"$/g, '').replace(/\\n/g, '\n'))
-        .join('')
-        .trim();
+      const streamed = textData.match(/0:"(.*?)"/g);
+      const fullResponseText = streamed?.map(t => t.slice(3, -1).replace(/\\n/g, '\n')).join('') || '';
 
-      // Fallback: extract answerBox.answer from browseWeb if available
-      if (!realReply && Array.isArray(data.toolInvocations)) {
-        const browseResult = data.toolInvocations.find(t =>
-          t.toolName === 'browseWeb' && t.state === 'result' && t.result?.answerBox?.answer
-        );
-        if (browseResult) {
-          realReply = browseResult.result.answerBox.answer;
+      const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
+
+      if (fullResponseText) {
+        conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
+      }
+
+      for (const toolCall of toolCalls) {
+        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
+          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
+          return;
+        }
+
+        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
+          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
+          return;
+        }
+
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
+          const streamedAnswerOnly = fullResponseText.trim();
+          if (streamedAnswerOnly) {
+            conversationHistory[senderId].push({ role: 'assistant', content: streamedAnswerOnly });
+            await sendMessage(senderId, {
+              text: `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${streamedAnswerOnly}\n・──── >ᴗ< ────・`
+            }, pageAccessToken);
+          }
+          return;
         }
       }
 
-      if (realReply) {
-        conversationHistory[senderId].push({ role: 'assistant', content: realReply });
-        for (const chunk of chunkMessage(realReply)) {
-          await sendMessage(senderId, { text: chunk }, pageAccessToken);
-        }
-        return;
-      }
+      if (!fullResponseText) throw new Error('Empty response from AI.');
 
-      throw new Error('Empty response from AI.');
+      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
+      for (const chunk of chunkMessage(formatted)) {
+        await sendMessage(senderId, { text: chunk }, pageAccessToken);
+      }
 
     } catch (err) {
       console.error('AI Command Error:', err?.response?.data || err.message || err);
       await sendMessage(senderId, { text: '❎ | An error occurred. Please try again later.' }, pageAccessToken);
     }
-  }
+  },
 };
