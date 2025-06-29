@@ -4,7 +4,7 @@ const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
 const conversationHistory = {};
-const imageCache = new Map(); // Cache per sender
+const imageCache = new Map();
 const MAX_HISTORY = 20;
 const KEEP_RECENT = 12;
 
@@ -16,8 +16,7 @@ const getImageUrl = async (event, token) => {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
     });
-    const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
-    return imageUrl;
+    return data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
   } catch (err) {
     console.error("Image URL fetch error:", err?.response?.data || err.message);
     return null;
@@ -57,15 +56,14 @@ module.exports = {
     };
 
     try {
-      // Try to get image URL from reply
       let imageUrl = await getImageUrl(event, pageAccessToken);
 
-      // Fallback to cached image if none found
-      if (!imageUrl && imageCache) {
+      // Always check cache as fallback
+      if (!imageUrl && imageCache.has(senderId)) {
         const cachedImage = imageCache.get(senderId);
-        if (cachedImage && Date.now() - cachedImage.timestamp <= 5 * 60 * 1000) {
+        if (Date.now() - cachedImage.timestamp <= 5 * 60 * 1000) {
           imageUrl = cachedImage.url;
-          console.log(`Using cached image for sender ${senderId}: ${imageUrl}`);
+          console.log(`Fallback: Using cached image for sender ${senderId}: ${imageUrl}`);
         }
       }
 
@@ -76,15 +74,16 @@ module.exports = {
 
       conversationHistory[senderId].push({ role: 'user', content: prompt });
 
-      const payload = { chatSessionId, messages: conversationHistory[senderId] };
+      const payload = {
+        chatSessionId,
+        messages: conversationHistory[senderId]
+      };
 
       if (imageUrl) {
         payload.toolInvocations = [{
           toolName: 'analyzeImage',
           args: { userQuery: prompt, imageUrls: [imageUrl] }
         }];
-
-        // Save latest image for sender
         imageCache.set(senderId, { url: imageUrl, timestamp: Date.now() });
       }
 
@@ -105,10 +104,12 @@ module.exports = {
           await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
           return;
         }
+
         if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
           await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
           return;
         }
+
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
           const snippets = toolCall.result.answerBox?.answer ||
             toolCall.result.organic?.map(o => o.snippet).filter(Boolean).join('\n\n') || 'No relevant info found.';
@@ -119,8 +120,8 @@ module.exports = {
       }
 
       if (!fullResponseText) throw new Error('Empty response from AI.');
-      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
 
+      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
       for (const chunk of chunkMessage(formatted)) {
         await sendMessage(senderId, { text: chunk }, pageAccessToken);
       }
@@ -129,5 +130,5 @@ module.exports = {
       console.error('AI Command Error:', err?.response?.data || err.message || err);
       await sendMessage(senderId, { text: '❎ | An error occurred. Please try again later.' }, pageAccessToken);
     }
-  },
+  }
 };
