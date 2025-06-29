@@ -78,39 +78,20 @@ module.exports = {
       }
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
-
-      // 🧠 Extract only 0:"..." lines (real assistant reply)
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
-      const responseTextChunks = textData
-        .split('\n')
-        .filter(line => line.startsWith('0:'))
-        .map(line => line.slice(2).replace(/^"+|"+$/g, '').replace(/\\n/g, '\n').replace(/\\"/g, '"'));
 
+      // ✅ Extract only 0:"..." streamed assistant lines
+      const responseTextChunks = Array.from(textData.matchAll(/0:"(.*?)"/g)).map(m =>
+        m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')
+      );
       const fullResponseText = responseTextChunks.join('').trim();
-      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
 
-      if (fullResponseText) {
-        conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
+      if (!fullResponseText) {
+        await sendMessage(senderId, { text: '⚠️ | No assistant reply was returned.' }, pageAccessToken);
+        return;
       }
 
-      for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `🖼️ Generated Image:\n${toolCall.result}` }, pageAccessToken);
-          return;
-        }
-
-        if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
-          return;
-        }
-
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
-          // skip appending any `toolCall.result.*`, we now only use assistant reply
-          break;
-        }
-      }
-
-      if (!fullResponseText) throw new Error('Empty response from AI.');
+      conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
 
       const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n・──── >ᴗ< ────・`;
       for (const chunk of chunkMessage(formatted)) {
