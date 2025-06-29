@@ -84,13 +84,11 @@ module.exports = {
         ? data
         : JSON.stringify(data);
 
-      const assistantReply = responseText.match(/(?:^|[^\\])"(?:[^"]*?)(?:Here)?(?:[^"]*?)\n?\d?\.\s\*\*(.*?)\*\*/g)
-        ? responseText
-        : responseText
-            .split('\n')
-            .map(l => l.replace(/^0:"/, '').replace(/"$/, '').replace(/\\n/g, '\n'))
-            .join('')
-            .trim();
+      const assistantReply = responseText
+        .split('\n')
+        .map(l => l.replace(/^0:\"/, '').replace(/\"$/, '').replace(/\\n/g, '\n'))
+        .join('')
+        .trim();
 
       const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
 
@@ -105,11 +103,14 @@ module.exports = {
           return;
         }
 
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
-          const snippets = toolCall.result.organic?.map(o => o.snippet).join('\n\n') || 'No relevant info found.';
-          const finalReply = assistantReply || snippets;
-          await sendMessage(senderId, { text: `💬 | Mocha Ai\n・───────────・\n${finalReply}\n・──── >ᴗ< ────・` }, pageAccessToken);
-          return;
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
+          if (assistantReply) {
+            await sendMessage(senderId, { text: `💬 | Mocha Ai\n・───────────・\n${assistantReply}\n・──── >ᴗ< ────・` }, pageAccessToken);
+            return;
+          } else {
+            await sendMessage(senderId, { text: `❎ | No assistant response.` }, pageAccessToken);
+            return;
+          }
         }
       }
 
