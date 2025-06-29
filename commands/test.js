@@ -27,8 +27,9 @@ const chunkMessage = (text, max = 1900) => {
   return chunks;
 };
 
-// Dynamic conversation history per sender
 const conversationHistory = {};
+const MAX_HISTORY = 20; // absolute max before trimming
+const KEEP_RECENT = 12; // keep most recent exchanges
 
 module.exports = {
   name: 'test',
@@ -38,7 +39,8 @@ module.exports = {
 
   async execute(senderId, args, pageAccessToken, event) {
     const prompt = args.join(' ').trim() || 'Hello';
-    const chatSessionId = senderId; // Use senderId for per-user chat
+    const chatSessionId = "fc053908-a0f3-4a9c-ad4a-008105dcc360";
+
     const headers = {
       "content-type": "application/json",
       "sec-ch-ua-platform": "\"Android\"",
@@ -56,6 +58,11 @@ module.exports = {
     try {
       const imageUrl = await getImageUrl(event, pageAccessToken);
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
+
+      // Manage history limit smoothly
+      if (conversationHistory[senderId].length > MAX_HISTORY) {
+        conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
+      }
 
       conversationHistory[senderId].push({ role: 'user', content: prompt });
 
