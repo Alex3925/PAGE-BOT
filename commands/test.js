@@ -3,36 +3,55 @@ const fs = require('fs');
 const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
-// Image cache: stores last image URL per sender
-const imageCache = new Map();
-const IMAGE_EXPIRY = 5 * 60 * 1000; // 5 minutes
+const sessionIds = [
+  "ba1a5c15-867a-4caa-b91d-d5ef01503aeb",
+  "448379a9-521d-4a50-9c9a-47e7a9b0227b",
+  "6417e57c-ac9f-4b8c-b3bd-1b03c0ddbd49",
+  "07ac79aa-177c-4ed9-a5cd-fa87bda63831",
+  "e10a6247-623f-4337-8cd0-bc98972c487f",
+  "fc053908-a0f3-4a9c-ad4a-008105dcc360",
+  "a14da8a4-6566-45bd-b589-0f3dff2a1779"
+];
+let sessionIndex = 0;
 
-const getImageUrl = async (event, token, senderId) => {
+const getNextSessionId = () => {
+  const id = sessionIds[sessionIndex];
+  sessionIndex = (sessionIndex + 1) % sessionIds.length;
+  return id;
+};
+
+const getImageUrl = async (event, token, imageCache, senderId) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
 
-  // Fallback to cache if not replying
   if (!mid) {
-    const cached = imageCache.get(senderId);
-    if (cached && Date.now() - cached.timestamp < IMAGE_EXPIRY) {
-      console.log(`Using cached image for sender ${senderId}`);
+    const cached = imageCache?.get(senderId);
+    if (cached && Date.now() - cached.timestamp <= 5 * 60 * 1000) {
+      console.log(`Fallback to cached image for ${senderId}: ${cached.url}`);
       return cached.url;
-    } else {
-      imageCache.delete(senderId);
-      return null;
     }
+    return null;
   }
 
   try {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
     });
+
     const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
-    if (imageUrl) {
+
+    if (imageUrl && imageCache) {
       imageCache.set(senderId, { url: imageUrl, timestamp: Date.now() });
+      console.log(`Cached image for ${senderId}: ${imageUrl}`);
     }
+
     return imageUrl;
   } catch (err) {
     console.error("Image URL fetch error:", err?.response?.data || err.message);
+    const cached = imageCache?.get(senderId);
+    if (cached && Date.now() - cached.timestamp <= 5 * 60 * 1000) {
+      console.log(`Fallback to cached image after API fail for ${senderId}: ${cached.url}`);
+      return cached.url;
+    }
     return null;
   }
 };
@@ -49,50 +68,27 @@ const conversationHistory = {};
 const MAX_HISTORY = 20;
 const KEEP_RECENT = 12;
 
-const sessionIds = [
-  "ba1a5c15-867a-4caa-b91d-d5ef01503aeb",
-  "448379a9-521d-4a50-9c9a-47e7a9b0227b",
-  "6417e57c-ac9f-4b8c-b3bd-1b03c0ddbd49",
-  "07ac79aa-177c-4ed9-a5cd-fa87bda63831",
-  "e10a6247-623f-4337-8cd0-bc98972c487f",
-  "fc053908-a0f3-4a9c-ad4a-008105dcc360",
-  "a14da8a4-6566-45bd-b589-0f3dff2a1779"
-];
-
-let sessionIndex = 0;
-
 module.exports = {
   name: 'test',
   description: 'Interact with Mocha AI using text queries and image analysis',
   usage: 'ask a question, or reply to an image with your question.',
   author: 'Coffee',
 
-  async execute(senderId, args, pageAccessToken, event) {
+  async execute(senderId, args, pageAccessToken, event, sendMessage, imageCache) {
     const prompt = args.join(' ').trim() || 'Hello';
-    const chatSessionId = sessionIds[sessionIndex++ % sessionIds.length];
-
-    // Cache any image in attachments
-    const attachments = event?.message?.attachments || [];
-    for (const attachment of attachments) {
-      if (attachment.type === 'image' && attachment.payload?.url) {
-        console.log(`Caching image for sender ${senderId}: ${attachment.payload.url}`);
-        imageCache.set(senderId, {
-          url: attachment.payload.url,
-          timestamp: Date.now()
-        });
-      }
-    }
+    const chatSessionId = getNextSessionId();
 
     const headers = {
-      "content-type": "application/json",
-      "origin": "https://digitalprotg-32922.chipp.ai",
-      "referer": "https://digitalprotg-32922.chipp.ai/w/chat/"
+      'content-type': 'application/json',
+      'origin': 'https://digitalprotg-32922.chipp.ai',
+      'referer': 'https://digitalprotg-32922.chipp.ai/w/chat/',
+      'cookie': '__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8'
     };
 
     try {
-      const imageUrl = await getImageUrl(event, pageAccessToken, senderId);
-      if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
+      const imageUrl = await getImageUrl(event, pageAccessToken, imageCache, senderId);
 
+      if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
       if (conversationHistory[senderId].length > MAX_HISTORY) {
         conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
       }
@@ -112,12 +108,13 @@ module.exports = {
       }
 
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
+
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
+      const responseTextChunks = textData.match(/"result":"(.*?)"/g)?.map(c => c.slice(10, -1).replace(/\\n/g, '\n')) ||
+                                 textData.match(/0:"(.*?)"/g)?.map(c => c.slice(3, -1).replace(/\\n/g, '\n')) || [];
 
-      const streamed = textData.match(/0:\"(.*?)\"/g);
-      const fullResponseText = streamed?.map(t => t.slice(3, -1).replace(/\\n/g, '\n')).join('') || '';
-
-      const toolCalls = data?.choices?.[0]?.message?.toolInvocations || [];
+      const fullResponseText = responseTextChunks.join('');
+      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
 
       if (fullResponseText) {
         conversationHistory[senderId].push({ role: 'assistant', content: fullResponseText });
@@ -130,7 +127,15 @@ module.exports = {
         }
 
         if (toolCall.toolName === 'analyzeImage' && toolCall.state === 'result' && toolCall.result) {
-          await sendMessage(senderId, { text: `📷 Image analysis result:\n${toolCall.result}` }, pageAccessToken);
+          await sendMessage(senderId, { text: `Image analysis result: ${toolCall.result}` }, pageAccessToken);
+          return;
+        }
+
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result) {
+          const snippets = toolCall.result.answerBox?.answer ||
+            toolCall.result.organic?.map(o => o.snippet).filter(Boolean).join('\n\n') || 'No relevant info found.';
+          const finalReply = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${fullResponseText}\n\nBrowse result:\n${snippets}\n・──── >ᴗ< ────・`;
+          await sendMessage(senderId, { text: finalReply }, pageAccessToken);
           return;
         }
       }
