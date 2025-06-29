@@ -93,9 +93,9 @@ module.exports = {
       }
 
       for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const urlMatch = toolCall.result.match(/\bhttps:\/\/[^\s)]+/);
-          const imageUrl = urlMatch?.[0];
+        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result') {
+          const match = fullResponseText.match(/(https:\/\/[^)]+)/);
+          const imageUrl = match?.[1];
           if (imageUrl) {
             await sendMessage(senderId, { text: imageUrl }, pageAccessToken);
           } else {
