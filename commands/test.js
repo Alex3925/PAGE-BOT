@@ -107,10 +107,11 @@ module.exports = {
         }
       }
 
-      // 🆕 Check for direct image URL
-      const match = fullResponseText.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s"]+/);
+      // ✅ Clean and send direct image URL if detected
+      const match = fullResponseText.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s")\]]+/);
       if (match) {
-        await sendMessage(senderId, { text: match[0] }, pageAccessToken);
+        const cleanUrl = match[0].replace(/[)\]]+$/, ''); // Remove trailing ) or ]
+        await sendMessage(senderId, { text: cleanUrl }, pageAccessToken);
         return;
       }
 
