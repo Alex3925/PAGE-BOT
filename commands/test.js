@@ -3,8 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
-const imageCache = new Map();
-
 const getImageUrl = async (event, token) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
   if (!mid) return null;
@@ -13,7 +11,6 @@ const getImageUrl = async (event, token) => {
     const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
       params: { access_token: token },
     });
-
     const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
     return imageUrl;
   } catch (err) {
@@ -31,6 +28,7 @@ const chunkMessage = (text, max = 1900) => {
 };
 
 const conversationHistory = {};
+const imageCache = new Map();
 const MAX_HISTORY = 20;
 const KEEP_RECENT = 12;
 
@@ -50,7 +48,7 @@ module.exports = {
       "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
       "sec-ch-ua": "\"Chromium\";v=\"136\", \"Brave\";v=\"136\", \"Not.A/Brand\";v=\"99\"",
       "sec-ch-ua-mobile": "?1",
-      "accept": "*/*",
+      "accept": "/",
       "sec-gpc": "1",
       "accept-language": "en-US,en;q=0.9",
       "origin": "https://digitalprotg-32922.chipp.ai",
@@ -61,7 +59,7 @@ module.exports = {
     try {
       let imageUrl = await getImageUrl(event, pageAccessToken);
 
-      // Fallback to cache if no image found
+      // Fallback to recent cached image
       if (!imageUrl && imageCache) {
         const cached = imageCache.get(senderId);
         if (cached && Date.now() - cached.timestamp <= 5 * 60 * 1000) {
@@ -70,12 +68,8 @@ module.exports = {
         }
       }
 
-      // Cache image if retrieved successfully
-      if (imageUrl) {
-        imageCache.set(senderId, { url: imageUrl, timestamp: Date.now() });
-      }
-
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
+
       if (conversationHistory[senderId].length > MAX_HISTORY) {
         conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
       }
@@ -88,6 +82,12 @@ module.exports = {
       };
 
       if (imageUrl) {
+        // Store the image in cache for future fallback use
+        imageCache.set(senderId, {
+          url: imageUrl,
+          timestamp: Date.now()
+        });
+
         payload.toolInvocations = [{
           toolName: 'analyzeImage',
           args: { userQuery: prompt, imageUrls: [imageUrl] }
@@ -97,8 +97,8 @@ module.exports = {
       const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
 
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
-      const responseTextChunks = textData.match(/"result":"(.*?)"/g)?.map(c => c.slice(10, -1).replace(/\\n/g, '\n')) ||
-        textData.match(/0:"(.*?)"/g)?.map(c => c.slice(3, -1).replace(/\\n/g, '\n')) || [];
+      const responseTextChunks = textData.match(/"result":"(.?)"/g)?.map(c => c.slice(10, -1).replace(/\n/g, '\n')) ||
+        textData.match(/0:"(.?)"/g)?.map(c => c.slice(3, -1).replace(/\n/g, '\n')) || [];
 
       const fullResponseText = responseTextChunks.join('');
       const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
