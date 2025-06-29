@@ -3,20 +3,30 @@ const fs = require('fs');
 const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
-const getImageUrl = async (event, token) => {
+const getImageUrl = async (event, token, senderId, imageCache) => {
   const mid = event?.message?.reply_to?.mid || event?.message?.mid;
-  if (!mid) return null;
+  let imageUrl = null;
 
-  try {
-    const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
-      params: { access_token: token },
-    });
-    const imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
-    return imageUrl;
-  } catch (err) {
-    console.error("Image URL fetch error:", err?.response?.data || err.message);
-    return null;
+  if (mid) {
+    try {
+      const { data } = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
+        params: { access_token: token },
+      });
+      imageUrl = data?.data?.[0]?.image_data?.url || data?.data?.[0]?.file_url || null;
+    } catch (err) {
+      console.error("Image URL fetch error:", err?.response?.data || err.message);
+    }
   }
+
+  // Fallback to cache if no image URL found
+  if (!imageUrl && imageCache?.has(senderId)) {
+    const cached = imageCache.get(senderId);
+    if (Date.now() - cached.timestamp <= 300000) {
+      imageUrl = cached.url;
+    }
+  }
+
+  return imageUrl;
 };
 
 const chunkMessage = (text, max = 1900) => {
@@ -28,8 +38,8 @@ const chunkMessage = (text, max = 1900) => {
 };
 
 const conversationHistory = {};
-const MAX_HISTORY = 20; // absolute max before trimming
-const KEEP_RECENT = 12; // keep most recent exchanges
+const MAX_HISTORY = 20;
+const KEEP_RECENT = 12;
 
 module.exports = {
   name: 'test',
@@ -37,7 +47,7 @@ module.exports = {
   usage: 'ask a question, or reply to an image with your question.',
   author: 'Coffee',
 
-  async execute(senderId, args, pageAccessToken, event) {
+  async execute(senderId, args, pageAccessToken, event, imageCache) {
     const prompt = args.join(' ').trim() || 'Hello';
     const chatSessionId = "fc053908-a0f3-4a9c-ad4a-008105dcc360";
 
@@ -56,10 +66,9 @@ module.exports = {
     };
 
     try {
-      const imageUrl = await getImageUrl(event, pageAccessToken);
+      const imageUrl = await getImageUrl(event, pageAccessToken, senderId, imageCache);
       if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
 
-      // Manage history limit smoothly
       if (conversationHistory[senderId].length > MAX_HISTORY) {
         conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
       }
@@ -82,7 +91,7 @@ module.exports = {
 
       const textData = typeof data === 'string' ? data : JSON.stringify(data);
       const responseTextChunks = textData.match(/"result":"(.*?)"/g)?.map(c => c.slice(10, -1).replace(/\\n/g, '\n')) ||
-                                 textData.match(/0:"(.*?)"/g)?.map(c => c.slice(3, -1).replace(/\\n/g, '\n')) || [];
+        textData.match(/0:"(.*?)"/g)?.map(c => c.slice(3, -1).replace(/\\n/g, '\n')) || [];
 
       const fullResponseText = responseTextChunks.join('');
       const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
