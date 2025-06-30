@@ -10,28 +10,35 @@ if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
 module.exports = {
   name: 'mp3',
-  description: 'Searches YouTube, fetches MP3 from y2mate.nu, and sends it as Messenger audio.',
-  usage: '-mp3 <song name>',
+  description: 'Searches YouTube or uses link to download MP3 and sends it via Messenger.',
+  usage: '-mp3 <search keywords or YouTube link>',
   author: 'coffee',
 
   async execute(id, args, token) {
     if (!args[0]) {
-      return sendMessage(id, { text: '❌ Please provide a song title.' }, token);
+      return sendMessage(id, { text: '❌ Please provide a song title or YouTube link.' }, token);
     }
 
-    // Step 1: Search YouTube via @distube/ytsr
-    let videoId;
+    let videoId = null;
+    const query = args.join(' ');
+
+    // Step 1: Determine if input is a YouTube link
     try {
-      const search = await ytsr(args.join(' ') + ' official music video', { limit: 1 });
-      const result = search.items[0];
-      if (!result?.url) return sendMessage(id, { text: '❌ No YouTube result found.' }, token);
-      videoId = new URL(result.url).searchParams.get('v');
+      if (query.includes('youtube.com') || query.includes('youtu.be')) {
+        const url = new URL(query.startsWith('http') ? query : `https://${query}`);
+        videoId = url.searchParams.get('v') || url.pathname.split('/').pop();
+      } else {
+        const search = await ytsr(query + ' official music video', { limit: 1 });
+        const result = search.items[0];
+        if (!result?.url) return sendMessage(id, { text: '❌ No YouTube result found.' }, token);
+        videoId = new URL(result.url).searchParams.get('v');
+      }
     } catch (e) {
-      console.error('[YouTube Search Error]', e.message);
-      return sendMessage(id, { text: '❌ Failed to search YouTube.' }, token);
+      console.error('[YouTube Parsing/Search Error]', e.message);
+      return sendMessage(id, { text: '❌ Invalid link or search failed.' }, token);
     }
 
-    // Step 2: Build API request using fixed sig
+    // Step 2: Build API call to y2mate-style server
     const sig = encodeURIComponent(
       'Wd2FTxj88xrSUNva+qfqVIe8J7L4sNg30aMMbmvnjq9Xi6KijSujCc8TTAExPOowBvNQMBvQ8Rx9dQ40XKmPJa1PPglBliWVKE7Y3ZbBkPxoi8TiQsKGsj21XUTQY/vQX1FxxqKr+n9SiiotTU2mUEiAW6kE6Ub6OGWGaDp8mi8n8MKo4UCAf5iA+jOf1r0KZZ2T1OUDdUSIi3DhN3L7ALOqqjj3I32ALY7SOoHNanOr8Y3lqZ0MpogWNZhthqFDn+I06dcsL0MpkoaSi0L/h8gasMAv7YYnrGcgjfWGxQY0D0gr8eIJHLZpX2zhiK0UZBiXRIhmCcndD/3uaLVhsw=='
     );
@@ -39,7 +46,6 @@ module.exports = {
 
     let downloadURL, title;
 
-    // Step 3: Call the API to get download URL
     try {
       const { data } = await axios.get(apiUrl, {
         headers: {
@@ -76,8 +82,8 @@ module.exports = {
     const filename = `${id}_${Date.now()}.mp3`;
     const filePath = path.join(TMP_DIR, filename);
 
-    // Step 4: Download and upload
     try {
+      // Download MP3
       const res = await axios({ url: downloadURL, method: 'GET', responseType: 'stream' });
       const writer = fs.createWriteStream(filePath);
       res.data.pipe(writer);
@@ -86,6 +92,7 @@ module.exports = {
         writer.on('error', reject);
       });
 
+      // Upload to Facebook
       const form = new FormData();
       form.append('message', JSON.stringify({ attachment: { type: 'audio', payload: {} } }));
       form.append('filedata', fs.createReadStream(filePath));
@@ -98,7 +105,7 @@ module.exports = {
 
       const attachmentId = uploadRes.data.attachment_id;
 
-      // Step 5: Send audio
+      // Send MP3 to user
       await sendMessage(id, {
         message: {
           attachment: {
