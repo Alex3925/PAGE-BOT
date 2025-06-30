@@ -1,146 +1,142 @@
 const axios = require('axios');
+const ytsr = require('@distube/ytsr');
 const fs = require('fs');
 const path = require('path');
 const FormData = require('form-data');
-const ytsr = require('@distube/ytsr');
 
 const TMP_DIR = path.join(__dirname, '..', 'temp');
-if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR);
+
+const BASE_INIT_URL = 'https://d.mnuu.nu/api/v1/init';
 
 module.exports = {
   name: 'mp3',
-  description: 'Search YouTube and send the MP3 audio file directly.',
+  description: 'Search YouTube and send audio as MP3 via Messenger.',
   usage: '-mp3 <song name>',
   author: 'coffee',
 
   async execute(id, args, token) {
-    if (!args[0]) {
+    if (!args.length) {
       return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
         recipient: { id },
         message: { text: '❌ Please provide a song title.' }
       });
     }
 
-    // Step 1: YouTube Search
-    let result;
+    // Step 1: Search YouTube
+    const query = args.join(' ') + ' official music video';
+    let yt;
     try {
-      result = (await ytsr(args.join(' ') + ' official music video', { limit: 1 })).items[0];
+      yt = (await ytsr(query, { limit: 1 })).items[0];
     } catch (err) {
-      console.error('[YTSR Error]', err.message);
       return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
         recipient: { id },
         message: { text: '❌ Failed to search YouTube.' }
       });
     }
 
-    if (!result || !result.url) {
-      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-        recipient: { id },
-        message: { text: '❌ No YouTube result found.' }
-      });
-    }
+    if (!yt?.url) return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
+      recipient: { id },
+      message: { text: '❌ No YouTube video found.' }
+    });
 
-    const videoId = new URL(result.url).searchParams.get('v');
-    const sig = encodeURIComponent(`SH+xhD5yQIvpe7Cc4AKrZCw9sCIl/vyS3bL3/NH0vrfxLczcocuvk/u0eeMewFnOkDDtd5yAYEu0te6FhDbK9LLeVz+N3nUDo66w4BoJQyEcRxvM/HE1gJHugtXQEjxXvEfzqIywalpHPaF5pSG0kQpRcRBlyNTeaYGBO12Jj6s2Dc/QRTw7BRACorI1rHJjo0yXYLbDWNCpluj2SKLead0SWQVKWx9Tivv5yZ2fat/ZYG8hJSuVP+Xi7Zs/IevQGSaXY4rzZ7sY9pcvdO2qG9zhh1ySzFDDKsePQmiyUidwrnH5PFPs5frpSiZYr7tolA6ckU6fsGoMKpHpiV0mCg==`);
-    const convertUrl = `https://uumm.mnuu.nu/api/v1/convert?sig=${sig}`;
+    const videoUrl = yt.url;
+    const gn = Buffer.from(videoUrl).toString('base64');
 
-    let downloadURL, title;
-
+    // Step 2: Get convertURL
+    let convertURL;
     try {
-      // Step 2: Get convertURL response
-      const { data: convertRes } = await axios.get(convertUrl, {
+      const { data: initRes } = await axios.get(`${BASE_INIT_URL}?gn=${gn}`, {
         headers: {
-          Host: 'uumm.mnuu.nu',
-          Origin: 'https://y2mate.nu',
-          Referer: 'https://y2mate.nu/',
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36',
-          Accept: '*/*'
+          'x-auth-key': 'k11lKcdXbfZ9N',
+          'Origin': 'https://y2mate.nu',
+          'Referer': 'https://y2mate.nu/',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36'
         }
       });
 
-      const nextUrl = convertRes.convertURL;
-      if (!nextUrl) throw new Error('No convertURL');
-
-      // Step 3: Follow redirectURL if needed
-      const { data: redirectRes } = await axios.get(nextUrl, {
-        headers: {
-          Host: new URL(nextUrl).host,
-          Origin: 'https://y2mate.nu',
-          Referer: 'https://y2mate.nu/',
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36',
-          Accept: '*/*'
-        }
-      });
-
-      const followUrl = redirectRes.redirect === 1 ? redirectRes.redirectURL : nextUrl;
-
-      // Step 4: Final fetch to get downloadURL
-      const { data: final } = await axios.get(followUrl, {
-        headers: {
-          Host: new URL(followUrl).host,
-          Origin: 'https://y2mate.nu',
-          Referer: 'https://y2mate.nu/',
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36',
-          Accept: '*/*'
-        }
-      });
-
-      if (!final.downloadURL) {
-        return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-          recipient: { id },
-          message: { text: '❌ No MP3 download link found.' }
-        });
-      }
-
-      downloadURL = final.downloadURL;
-      title = final.title || 'Audio';
-
+      if (!initRes.convertURL) throw new Error('Missing convertURL');
+      convertURL = initRes.convertURL;
     } catch (err) {
-      console.error('[Redirect/Download URL Error]', err.message);
       return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
         recipient: { id },
-        message: { text: '❌ Failed to resolve MP3 download.' }
+        message: { text: '❌ Could not initialize download session.' }
       });
     }
 
-    // Step 5: Download MP3
-    const filename = `${id}_${Date.now()}.mp3`;
-    const filePath = path.join(TMP_DIR, filename);
+    // Step 3: Follow redirect or download URL
+    let downloadURL, finalTitle;
+    try {
+      const { data: step2 } = await axios.get(convertURL, {
+        headers: {
+          'Origin': 'https://y2mate.nu',
+          'Referer': 'https://y2mate.nu/',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36'
+        }
+      });
 
+      const urlToFollow = step2.redirect ? step2.redirectURL : convertURL;
+      const { data: step3 } = await axios.get(urlToFollow, {
+        headers: {
+          'Origin': 'https://y2mate.nu',
+          'Referer': 'https://y2mate.nu/',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36'
+        }
+      });
+
+      downloadURL = step3.downloadURL;
+      finalTitle = step3.title || yt.title;
+    } catch (err) {
+      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
+        recipient: { id },
+        message: { text: '❌ Could not retrieve MP3 download URL.' }
+      });
+    }
+
+    if (!downloadURL) {
+      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
+        recipient: { id },
+        message: { text: '❌ No MP3 download link available.' }
+      });
+    }
+
+    // Step 4: Download MP3
+    const filename = `mp3_${id}_${Date.now()}.mp3`;
+    const filepath = path.join(TMP_DIR, filename);
     try {
       const res = await axios({ url: downloadURL, method: 'GET', responseType: 'stream' });
-      const writer = fs.createWriteStream(filePath);
+      const writer = fs.createWriteStream(filepath);
       res.data.pipe(writer);
       await new Promise((resolve, reject) => {
         writer.on('finish', resolve);
         writer.on('error', reject);
       });
+    } catch (err) {
+      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
+        recipient: { id },
+        message: { text: '❌ Failed to download MP3 file.' }
+      });
+    }
 
-      // Step 6: Send MP3 via Graph API v23.0
+    // Step 5: Send MP3 to Facebook
+    try {
       const form = new FormData();
       form.append('recipient', JSON.stringify({ id }));
       form.append('message', JSON.stringify({
-        attachment: {
-          type: 'audio',
-          payload: {}
-        }
+        attachment: { type: 'audio', payload: {} }
       }));
-      form.append('filedata', fs.createReadStream(filePath));
+      form.append('filedata', fs.createReadStream(filepath));
 
-      await axios.post(
-        `https://graph.facebook.com/v23.0/me/messages?access_token=${token}`,
-        form,
-        { headers: form.getHeaders() }
-      );
-
+      await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, form, {
+        headers: form.getHeaders()
+      });
     } catch (err) {
-      console.error('[Download/Send Error]', err.message);
       await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
         recipient: { id },
-        message: { text: '❌ Failed to send MP3 file.' }
+        message: { text: '❌ Failed to send MP3 to Messenger.' }
       });
     } finally {
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
     }
   }
 };
