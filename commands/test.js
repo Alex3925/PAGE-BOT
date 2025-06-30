@@ -1,129 +1,63 @@
 const axios = require('axios');
 const ytsr = require('@distube/ytsr');
-const fs = require('fs');
-const path = require('path');
-const FormData = require('form-data');
-
-const TMP_DIR = path.join(__dirname, '..', 'temp');
-if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR);
-
-const CONVERT_HOST = 'https://nmuu.mnuu.nu';
-const HEADERS = {
-  Host: 'nmuu.mnuu.nu',
-  Connection: 'keep-alive',
-  'sec-ch-ua-platform': '"Android"',
-  'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36',
-  'sec-ch-ua': '"Not)A;Brand";v="8", "Chromium";v="138", "Brave";v="138"',
-  'sec-ch-ua-mobile': '?1',
-  Accept: '*/*',
-  'Sec-GPC': '1',
-  'Accept-Language': 'en-US,en;q=0.7',
-  Origin: 'https://y2mate.nu',
-  Referer: 'https://y2mate.nu/',
-  'Accept-Encoding': 'gzip, deflate, br, zstd'
-};
+const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
-  name: 'mp3',
-  description: 'Search YouTube and send MP3 to Messenger.',
-  usage: '-mp3 <song name>',
+  name: 'test',
+  description: 'Searches for songs on YouTube and provides audio links.',
+  usage: '-test <song name>',
   author: 'coffee',
 
   async execute(id, args, token) {
-    if (!args.length) {
-      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-        recipient: { id },
-        message: { text: '❌ Please provide a song title.' }
-      });
-    }
+    if (!args[0]) return sendMessage(id, { text: 'Error: Please provide a song title.' }, token);
 
-    // Step 1: YouTube search
-    const query = args.join(' ') + ' official music video';
-    let yt;
+    // Step 1: Search for the top YouTube result
+    const result = (await ytsr(`${args.join(' ')}, official music video`, { limit: 1 })).items[0];
+    if (!result?.url || !result?.id) return sendMessage(id, { text: 'Error: Could not find song.' }, token);
+
     try {
-      yt = (await ytsr(query, { limit: 1 })).items[0];
-    } catch {
-      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-        recipient: { id },
-        message: { text: '❌ YouTube search failed.' }
+      // Step 2: Get MP3 tokens from the new CDN API
+      const { data } = await axios.get(`https://c01-h01.cdnframe.com/api/v4/info/${result.id}`, {
+        headers: {
+          'referer': 'https://clickapi.net/',
+          'origin': 'https://clickapi.net/',
+          'accept': 'application/json',
+          'user-agent': 'Mozilla/5.0'
+        }
       });
-    }
 
-    if (!yt?.url) return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-      recipient: { id },
-      message: { text: '❌ No video found.' }
-    });
+      const mp3List = data?.formats?.audio?.mp3;
+      if (!mp3List || !mp3List.length) return sendMessage(id, { text: 'Error: MP3 not available.' }, token);
 
-    const videoId = new URL(yt.url).searchParams.get('v');
-    if (!videoId) return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-      recipient: { id },
-      message: { text: '❌ Failed to extract video ID.' }
-    });
+      const mp3 = mp3List.find(x => x.quality === 320) || mp3List[0];
+      const mp3Url = `https://clickapi.net/dl?token=${mp3.token}`;
 
-    // Step 2: Request convert
-    const sig = encodeURIComponent(Date.now().toString(36) + Math.random().toString(36).slice(2)); // dummy to trigger redirect
-    const convertUrl = `${CONVERT_HOST}/api/v1/convert?sig=${sig}&v=${videoId}&f=mp3&_=${Math.random()}`;
+      // Step 3: Send audio info card
+      await sendMessage(id, {
+        attachment: {
+          type: 'template',
+          payload: {
+            template_type: 'generic',
+            elements: [{
+              title: `🎧 Title: ${data.title}`,
+              image_url: data.thumbnail,
+              subtitle: 'Audio ready. Tap below to listen.'
+            }]
+          }
+        }
+      }, token);
 
-    let finalUrl;
-    try {
-      const res1 = await axios.get(convertUrl, { headers: HEADERS });
-      if (res1.data.redirect && res1.data.redirectURL) {
-        const res2 = await axios.get(res1.data.redirectURL, { headers: HEADERS });
-        finalUrl = res2.data.downloadURL;
-        yt.title = res2.data.title || yt.title;
-      } else {
-        finalUrl = res1.data.downloadURL;
-        yt.title = res1.data.title || yt.title;
-      }
-    } catch {
-      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-        recipient: { id },
-        message: { text: '❌ Failed to get download link.' }
-      });
-    }
+      // Step 4: Send actual audio file link
+      sendMessage(id, {
+        attachment: {
+          type: 'audio',
+          payload: { url: mp3Url }
+        }
+      }, token);
 
-    if (!finalUrl) return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-      recipient: { id },
-      message: { text: '❌ No valid MP3 link found.' }
-    });
-
-    // Step 3: Download MP3
-    const filename = `mp3_${id}_${Date.now()}.mp3`;
-    const filepath = path.join(TMP_DIR, filename);
-    try {
-      const fileRes = await axios({ url: finalUrl, method: 'GET', responseType: 'stream' });
-      const writer = fs.createWriteStream(filepath);
-      fileRes.data.pipe(writer);
-      await new Promise((resolve, reject) => {
-        writer.on('finish', resolve);
-        writer.on('error', reject);
-      });
-    } catch {
-      return axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-        recipient: { id },
-        message: { text: '❌ Failed to download MP3.' }
-      });
-    }
-
-    // Step 4: Send audio
-    try {
-      const form = new FormData();
-      form.append('recipient', JSON.stringify({ id }));
-      form.append('message', JSON.stringify({
-        attachment: { type: 'audio', payload: {} }
-      }));
-      form.append('filedata', fs.createReadStream(filepath));
-
-      await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, form, {
-        headers: form.getHeaders()
-      });
-    } catch {
-      await axios.post(`https://graph.facebook.com/v23.0/me/messages?access_token=${token}`, {
-        recipient: { id },
-        message: { text: '❌ Failed to send audio.' }
-      });
-    } finally {
-      if (fs.existsSync(filepath)) fs.unlinkSync(filepath);
+    } catch (err) {
+      console.error(err);
+      return sendMessage(id, { text: 'Error: Failed to fetch MP3.' }, token);
     }
   }
 };
