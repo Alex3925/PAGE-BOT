@@ -9,100 +9,118 @@ module.exports = {
   author: 'coffee',
 
   async execute(id, args, token) {
-    if (!args[0]) return sendMessage(id, { text: 'Error: Please provide a song title.' }, token);
+    if (!args[0]) return sendMessage(id, { text: '❌ Please provide a song title.' }, token);
 
     const query = `${args.join(' ')}, official music video`;
     const result = (await ytsr(query, { limit: 1 })).items[0];
-    if (!result?.url || !result?.id) return sendMessage(id, { text: 'Error: Could not find song.' }, token);
+    if (!result?.url || !result?.id) return sendMessage(id, { text: '❌ Could not find song.' }, token);
 
-    const videoId = result.id;
+    const videoUrl = result.url;
 
     try {
-      // Step 1: Initial request to get task info and hash
-      const initConvert = await axios.post('https://savemp3.net/b772a/youtube-video-to-mp3/', [
-        `https://youtu.be/${videoId}`,
-        '0.1Q1GHkL20jC5UuiFVgpX34tX-M3CuBOXVmAqkV6rxW31fR89AleMWxvdpfRUtzCOHjUHZBch_kiKnLmomNCzeo_ovXBTZNLxhkR8JJuEwq00hgHithDW7gpBfJqSThWDqhOFi8C2bOg0c62y-3DgZ_ynyxjida1K9QwMqq5Gbw9QAkjxP7j-8XAKruiXFxLHieGpSqvb6iuBzdLvq9h9CBznmMPOkA5gJ_9OI4N2KB7iaGAlIBoIqcC4IRBWWM2bnhDMmHDtVqQTMUjdvHdNb5ZFisQcylHGZhE5iyRpO3Ra-c77oyj7-TXQGBmswMnoXE-qy4rAzrP2LPfD6oOZLBmDraMn0wZ8bmwbPEFjM4J14bjbOlsUKDzjz6OnKsch4ZOmDQuOCO9Gu1I9aFwv2S6mGWAmvF3kF-YreY3tyIKJCmUT8-exEaCQkBnZK92Q28aTI-KJlEXxjpT8YnQvuVIZxmttm_Q_t8gc3FMUG4U_c35UUg6Np8Zl_q-mDwDVC4wTqDZQ9hTjaXJOSiIBREFKhucyX1zU2PtzSHyaQEAJk5EpZbMDQLT3ZLIdYMXWiyG-qMThCo3-4T2DAY4Ba1tQcXcycRpVejvVTWAXanAFrMiLwEobwDB4ZXE2NaoxKdOQM3TpWfI7YsV4emBlrjRWahzlwD1tBe-iSPRa5A_NbYenC22Oy-reCKhMngX0KGnQ-IXrMZej0lujSQrXOFIvpe_Pqz7xu3SXdJY_uufNh4-uN93P1G-Ax2xFVr1ZiuYMuaXXOkNB0fbb4WEBekGvjJHXixtNo3vUBF4UMnsS3nTS2dNCpH5lxnjj4IspERwm8uvZCdDokoPlVWQ3Sx4_zH8sd7jOB6cbzY8OEoaP46qS5EEwub6TL7hxvhQI.bc05yik5KuHgXy4fu7xWQw.ce1a9180a72ceb6c069544e9f380e30a6426e90956fc3dbcb7a4c266be5eccdc`
-      ], {
-        headers: {
-          'content-type': 'text/plain;charset=UTF-8',
-          'origin': 'https://savemp3.net',
-          'referer': 'https://savemp3.net/b772a/youtube-video-to-mp3/',
-          'user-agent': 'Mozilla/5.0'
-        }
-      });
-
-      const audioTask = initConvert.data?.[1]?.data?.tasks?.find(x => x.bitrate === 128) || initConvert.data?.[1]?.data?.tasks?.[0];
-      if (!audioTask?.hash) return sendMessage(id, { text: 'Error: No MP3 hash found.' }, token);
-
-      // Step 2: Request MP3 task using hash
-      const taskCreate = await axios.post('https://savemp3.net/b772a/youtube-video-to-mp3/', [{
-        task: {
-          bitrate: audioTask.bitrate,
-          filesize: audioTask.filesize,
-          hash: audioTask.hash
-        },
-        length: initConvert.data[1].data.durationSec
-      }], {
-        headers: {
-          'content-type': 'text/plain;charset=UTF-8',
-          'origin': 'https://savemp3.net',
-          'referer': 'https://savemp3.net/b772a/youtube-video-to-mp3/',
-          'user-agent': 'Mozilla/5.0'
-        }
-      });
-
-      const taskId = taskCreate.data?.[1]?.data?.taskId;
-      if (!taskId) return sendMessage(id, { text: 'Error: Failed to create MP3 task.' }, token);
-
-      // Step 3: Poll for download URL
-      let downloadUrl = null;
-      for (let i = 0; i < 10; i++) {
-        const status = await axios.post('https://savemp3.net/b772a/youtube-video-to-mp3/', [taskId], {
+      // Step 1: Get available MP3 tasks (returns a list with hash)
+      const { data: taskOptions } = await axios.post(
+        'https://savemp3.net/b772a/youtube-video-to-mp3/',
+        [videoUrl],
+        {
           headers: {
             'content-type': 'text/plain;charset=UTF-8',
-            'origin': 'https://savemp3.net',
-            'referer': 'https://savemp3.net/b772a/youtube-video-to-mp3/',
-            'user-agent': 'Mozilla/5.0'
-          }
-        });
+            origin: 'https://savemp3.net',
+            referer: 'https://savemp3.net/b772a/youtube-video-to-mp3/',
+            'user-agent': 'Mozilla/5.0',
+          },
+        }
+      );
 
-        const data = status.data?.[1]?.data;
-        if (data?.status === 'finished') {
-          downloadUrl = data.download;
+      const taskData = taskOptions?.[1]?.data;
+      const task = taskData?.tasks?.find(t => t.bitrate === 128) || taskData?.tasks?.[0];
+      if (!task?.hash) return sendMessage(id, { text: '❌ Could not retrieve MP3 hash.' }, token);
+
+      // Step 2: Create conversion task
+      const { data: convertInit } = await axios.post(
+        'https://savemp3.net/b772a/youtube-video-to-mp3/',
+        [
+          {
+            task: {
+              bitrate: task.bitrate,
+              filesize: task.filesize,
+              hash: task.hash,
+            },
+            length: taskData.durationSec || 180,
+            from: null,
+            to: null,
+          },
+        ],
+        {
+          headers: {
+            'content-type': 'text/plain;charset=UTF-8',
+            origin: 'https://savemp3.net',
+            referer: 'https://savemp3.net/b772a/youtube-video-to-mp3/',
+            'user-agent': 'Mozilla/5.0',
+          },
+        }
+      );
+
+      const taskId = convertInit?.[1]?.data?.taskId;
+      if (!taskId) return sendMessage(id, { text: '❌ Failed to start conversion.' }, token);
+
+      // Step 3: Poll for download link
+      let downloadUrl = null;
+      for (let i = 0; i < 10; i++) {
+        const { data: pollData } = await axios.post(
+          'https://savemp3.net/b772a/youtube-video-to-mp3/',
+          [taskId],
+          {
+            headers: {
+              'content-type': 'text/plain;charset=UTF-8',
+              origin: 'https://savemp3.net',
+              referer: 'https://savemp3.net/b772a/youtube-video-to-mp3/',
+              'user-agent': 'Mozilla/5.0',
+            },
+          }
+        );
+
+        const poll = pollData?.[1]?.data;
+        if (poll?.status === 'finished' && poll.download) {
+          downloadUrl = poll.download;
           break;
         }
 
-        await new Promise(r => setTimeout(r, 1500)); // wait 1.5s
+        await new Promise(res => setTimeout(res, 1500)); // wait 1.5s
       }
 
-      if (!downloadUrl) return sendMessage(id, { text: 'Error: MP3 download not ready.' }, token);
+      if (!downloadUrl) return sendMessage(id, { text: '❌ MP3 is not ready after several tries.' }, token);
 
-      // Step 4: Send info card
+      // Step 4: Send preview card
       await sendMessage(id, {
         attachment: {
           type: 'template',
           payload: {
             template_type: 'generic',
-            elements: [{
-              title: `🎧 Title: ${result.title}`,
-              image_url: result.bestThumbnail?.url || '',
-              subtitle: 'Audio ready. Tap below to listen.'
-            }]
-          }
-        }
+            elements: [
+              {
+                title: `🎵 ${result.title}`,
+                image_url: result.bestThumbnail?.url || '',
+                subtitle: 'Tap below to play audio.',
+              },
+            ],
+          },
+        },
       }, token);
 
-      // Step 5: Send final MP3
+      // Step 5: Send actual MP3
       sendMessage(id, {
         attachment: {
           type: 'audio',
-          payload: { url: downloadUrl }
-        }
+          payload: {
+            url: downloadUrl,
+          },
+        },
       }, token);
 
     } catch (err) {
-      console.error('Error:', err.message);
-      return sendMessage(id, { text: '❌ Error: MP3 download failed.' }, token);
+      console.error('❌ Error downloading MP3:', err);
+      return sendMessage(id, { text: '❌ Something went wrong. Please try again later.' }, token);
     }
-  }
+  },
 };
