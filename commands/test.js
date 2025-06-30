@@ -50,7 +50,7 @@ module.exports = {
       form.append('message', ' ');
       form.append('filedata', fs.createReadStream(filePath));
       const uploadRes = await axios.post(
-        `https://graph.facebook.com/v17.0/me/messages`,
+        `https://graph.facebook.com/v23.0/me/messages`,
         form,
         {
           headers: {
