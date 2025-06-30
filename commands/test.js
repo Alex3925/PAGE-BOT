@@ -13,9 +13,9 @@ module.exports = {
 
     try {
       const result = await ytdl.mp3(url);
-      const { title, url: downloadUrl } = result;
-
-      return sendMessage(message, `🎵 *${title}*\n\n🔗 MP3 Download:\n${downloadUrl}`);
+      // Convert the entire result object to a readable JSON string
+      const resultText = "✅ MP3 Result:\n\n" + JSON.stringify(result, null, 2);
+      return sendMessage(message, resultText);
     } catch (error) {
       return sendMessage(message, `❌ Failed to retrieve MP3.\n\nError: ${error.message}`);
     }
