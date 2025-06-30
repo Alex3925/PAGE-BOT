@@ -2,7 +2,7 @@ const { search, ytmp3 } = require('@lyrra-evanth/src-yt');
 const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
-  name: 'ytmusic',
+  name: 'test',
   description: 'Searches for songs on YouTube and provides audio links.',
   usage: '-ytmusic <song name>',
   author: 'coffee',
