@@ -1,9 +1,9 @@
-const { search, ytmp3 } = require('@lyrra-evanth/src-yt');
+const { search, ytdlv2 } = require('@lyrra-evanth/src-yt');
 const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
   name: 'test',
-  description: 'Searches for songs on YouTube and provides audio links.',
+  description: 'Searches for songs on YouTube and provides MP3/MP4 download links.',
   usage: '-ytmusic <song name>',
   author: 'coffee',
 
@@ -19,40 +19,47 @@ module.exports = {
       return sendMessage(id, { text: '❌ Could not find the song on YouTube.' }, token);
     }
 
-    const video = result.results[0]; // best match
+    const video = result.results[0];
     const url = video.url;
 
-    let mp3;
+    let media;
     try {
-      mp3 = await ytmp3(url, '128');
+      // Default quality fallback (128 for audio or 360 for video)
+      media = await ytdlv2(url); 
     } catch (err) {
-      return sendMessage(id, { text: '❌ Failed to download audio.' }, token);
+      return sendMessage(id, { text: '❌ Failed to download media.' }, token);
     }
 
-    if (!mp3.status || !mp3.download) {
-      return sendMessage(id, { text: `❌ Error: ${mp3.result || 'Unknown error'}` }, token);
+    if (!media.status || !media.download) {
+      return sendMessage(id, { text: `❌ Error: ${media.result || 'Unknown error'}` }, token);
     }
 
-    // Send preview
+    const meta = media.metadata;
+
+    // Send preview card
     await sendMessage(id, {
       attachment: {
         type: 'template',
         payload: {
           template_type: 'generic',
           elements: [{
-            title: `🎧 Title: ${mp3.metadata.title}`,
-            image_url: mp3.metadata.thumbnail,
-            subtitle: `Duration: ${mp3.metadata.duration}`
+            title: `🎧 Title: ${meta.title}`,
+            image_url: meta.thumbnail,
+            subtitle: `Duration: ${meta.duration}`
           }]
         }
       }
     }, token);
 
-    // Send MP3
+    // Determine type by file extension
+    const ext = media.download.split('.').pop().toLowerCase();
+    const type = ext === 'mp3' ? 'audio' : 'video';
+
+    // Send media file
     await sendMessage(id, {
       attachment: {
-        type: 'audio',
-        payload: { url: mp3.download }
+        type,
+        payload: { url: media.download }
       }
     }, token);
   }
