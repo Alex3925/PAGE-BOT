@@ -19,17 +19,29 @@ module.exports = {
       return sendMessage(id, { text: '❌ Please provide a song title.' }, token);
     }
 
-    // Step 1: Search YouTube
-    const result = (await ytsr(args.join(' ') + ' official music video', { limit: 1 })).items[0];
-    if (!result) return sendMessage(id, { text: '❌ No YouTube result found.' }, token);
-
-    const videoId = new URL(result.url).searchParams.get('v');
-    const sig = encodeURIComponent(`Jw8fCoukC80p1auFdBskok1WZG+vNMWmszSBuBdSIWc7ci+XHknlEvFCIrhV3/ofSpP7+nrduQC2R91PYRAgKsGYqra5h04l1wXDZ+UZOTvjlDbPHzWVphwChSU8/jk5Gf9WYa/bwk8kKPiKEAIY3dZ2emOn0Thi2IsJHKMoRYnsM5UFHgi49rBqTLGdyM/8hGE3Cej/y81syKtfwhX13fHN/gumbEcOvP8PqiqlG6zHDXgI1YDy84+K07cL1bMW5AsBxa+BwGQsNZ2YjTXVer7VavzEouakM9wJlR2OOCmPxl+wbKUoDpDbqg/P3/TQLerKBOTg38rlkKiP7eULOQ==`);
-    const apiURL = `https://nmuu.mnuu.nu/api/v1/convert?sig=${sig}&v=${videoId}&f=mp3&_=${Math.random()}`;
-
-    let downloadURL;
+    // Step 1: Search YouTube via @distube/ytsr
+    let videoId;
     try {
-      const { data } = await axios.get(apiURL, {
+      const search = await ytsr(args.join(' ') + ' official music video', { limit: 1 });
+      const result = search.items[0];
+      if (!result?.url) return sendMessage(id, { text: '❌ No YouTube result found.' }, token);
+      videoId = new URL(result.url).searchParams.get('v');
+    } catch (e) {
+      console.error('[YouTube Search Error]', e.message);
+      return sendMessage(id, { text: '❌ Failed to search YouTube.' }, token);
+    }
+
+    // Step 2: Build API request using fixed sig
+    const sig = encodeURIComponent(
+      'Wd2FTxj88xrSUNva+qfqVIe8J7L4sNg30aMMbmvnjq9Xi6KijSujCc8TTAExPOowBvNQMBvQ8Rx9dQ40XKmPJa1PPglBliWVKE7Y3ZbBkPxoi8TiQsKGsj21XUTQY/vQX1FxxqKr+n9SiiotTU2mUEiAW6kE6Ub6OGWGaDp8mi8n8MKo4UCAf5iA+jOf1r0KZZ2T1OUDdUSIi3DhN3L7ALOqqjj3I32ALY7SOoHNanOr8Y3lqZ0MpogWNZhthqFDn+I06dcsL0MpkoaSi0L/h8gasMAv7YYnrGcgjfWGxQY0D0gr8eIJHLZpX2zhiK0UZBiXRIhmCcndD/3uaLVhsw=='
+    );
+    const apiUrl = `https://nmuu.mnuu.nu/api/v1/convert?sig=${sig}&v=${videoId}&f=mp3&_=${Math.random()}`;
+
+    let downloadURL, title;
+
+    // Step 3: Call the API to get download URL
+    try {
+      const { data } = await axios.get(apiUrl, {
         headers: {
           Host: 'nmuu.mnuu.nu',
           Connection: 'keep-alive',
@@ -50,21 +62,22 @@ module.exports = {
       });
 
       if (!data?.downloadURL) {
-        return sendMessage(id, { text: '⚠️ Failed to get MP3 download URL.' }, token);
+        return sendMessage(id, { text: '❌ MP3 download link not found.' }, token);
       }
 
       downloadURL = data.downloadURL;
+      title = data.title || 'Audio';
 
     } catch (err) {
-      console.error('[y2mate.nu error]', err.message);
-      return sendMessage(id, { text: '❌ Failed to fetch MP3 info.' }, token);
+      console.error('[API Fetch Error]', err.message);
+      return sendMessage(id, { text: '⚠️ Failed to get MP3 download info.' }, token);
     }
 
     const filename = `${id}_${Date.now()}.mp3`;
     const filePath = path.join(TMP_DIR, filename);
 
+    // Step 4: Download and upload
     try {
-      // Step 2: Download MP3
       const res = await axios({ url: downloadURL, method: 'GET', responseType: 'stream' });
       const writer = fs.createWriteStream(filePath);
       res.data.pipe(writer);
@@ -73,7 +86,6 @@ module.exports = {
         writer.on('error', reject);
       });
 
-      // Step 3: Upload MP3 to Facebook
       const form = new FormData();
       form.append('message', JSON.stringify({ attachment: { type: 'audio', payload: {} } }));
       form.append('filedata', fs.createReadStream(filePath));
@@ -86,7 +98,7 @@ module.exports = {
 
       const attachmentId = uploadRes.data.attachment_id;
 
-      // Step 4: Send MP3 as audio attachment
+      // Step 5: Send audio
       await sendMessage(id, {
         message: {
           attachment: {
@@ -97,8 +109,8 @@ module.exports = {
       }, token);
 
     } catch (err) {
-      console.error('[MP3 send error]', err.message);
-      sendMessage(id, { text: '❌ Failed to send MP3 file.' }, token);
+      console.error('[Download/Upload Error]', err.message);
+      sendMessage(id, { text: '❌ Error downloading or sending MP3.' }, token);
     } finally {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
