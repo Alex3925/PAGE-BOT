@@ -35,7 +35,7 @@ module.exports = {
       // Step 3: Pick lowest quality MP3 (64 kbps)
       const sorted = mp3List.sort((a, b) => a.quality - b.quality);
       const mp3 = sorted[0];
-      const downloadUrl = `https://cdnframe.com/api/v4/stream/${mp3.token}`;
+      const downloadUrl = `https://c01-h01.cdnframe.com/api/v4/stream/${mp3.token}`;
 
       // Step 4: Download MP3 to temp file
       const filename = path.resolve(__dirname, `temp-${Date.now()}.mp3`);
