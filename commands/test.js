@@ -1,139 +1,106 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const FormData = require('form-data');
+const ytsr = require('@distube/ytsr');
 const { sendMessage } = require('../handles/sendMessage');
 
-const getImageUrl = async (event, token, cache) => {
-  const mid = event?.message?.reply_to?.mid || event?.message?.mid;
-  if (mid) {
-    try {
-      const res = await axios.get(`https://graph.facebook.com/v23.0/${mid}/attachments`, {
-        params: { access_token: token }
-      });
-      return res.data?.data?.[0]?.image_data?.url ?? res.data?.data?.[0]?.file_url;
-    } catch (e) {
-      console.warn("Image fetch error:", e?.response?.data || e.message);
-    }
-  }
-  const c = cache?.get(event.sender.id);
-  return c && Date.now() - c.timestamp < 300000 ? c.url : null;
-};
-
-const sessionIds = [
-  "ba1a5c15-867a-4caa-b91d-d5ef01503aeb",
-  "448379a9-521d-4a50-9c9a-47e7a9b0227b",
-  "6417e57c-ac9f-4b8c-b3bd-1b03c0ddbd49",
-  "07ac79aa-177c-4ed9-a5cd-fa87bda63831",
-  "e10a6247-623f-4337-8cd0-bc98972c487f",
-  "fc053908-a0f3-4a9c-ad4a-008105dcc360",
-  "a14da8a4-6566-45bd-b589-0f3dff2a1779"
-];
-let sessionIndex = 0;
-
-const getNextSessionId = () => {
-  const id = sessionIds[sessionIndex];
-  sessionIndex = (sessionIndex + 1) % sessionIds.length;
-  return id;
-};
-
-const chunkMessage = (text, max = 1900) => {
-  const chunks = [];
-  for (let i = 0; i < text.length; i += max) {
-    chunks.push(text.slice(i, i + max));
-  }
-  return chunks;
-};
-
-const conversationHistory = {};
-const MAX_HISTORY = 20;
-const KEEP_RECENT = 12;
+const TMP_DIR = path.join(__dirname, '..', 'temp');
+if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
 module.exports = {
-  name: 'test',
-  description: 'Interact with Mocha AI using text queries.',
-  usage: 'ask a question, optionally with image',
+  name: 'mp3',
+  description: 'Searches YouTube, fetches MP3 from y2mate.nu, and sends it as Messenger audio.',
+  usage: '-mp3 <song name>',
   author: 'coffee',
 
-  async execute(senderId, args, pageAccessToken, event, sendMessage, imageCache) {
-    const rawPrompt = args.join(' ').trim() || 'Hello';
-    const chatSessionId = getNextSessionId();
+  async execute(id, args, token) {
+    if (!args[0]) {
+      return sendMessage(id, { text: '❌ Please provide a song title.' }, token);
+    }
 
-    const imageUrl = await getImageUrl(event, pageAccessToken, imageCache);
-    const prompt = imageUrl ? `${rawPrompt}\n\nImage URL: ${imageUrl}` : rawPrompt;
+    // Step 1: Search YouTube
+    const result = (await ytsr(args.join(' ') + ' official music video', { limit: 1 })).items[0];
+    if (!result) return sendMessage(id, { text: '❌ No YouTube result found.' }, token);
 
-    const headers = {
-      'content-type': 'application/json',
-      'origin': 'https://digitalprotg-32922.chipp.ai',
-      'referer': 'https://digitalprotg-32922.chipp.ai/w/chat/',
-      'cookie': '__Host-next-auth.csrf-token=4723c7d0081a66dd0b572f5e85f5b40c2543881365782b6dcca3ef7eabdc33d6%7C06adf96c05173095abb983f9138b5e7ee281721e3935222c8b369c71c8e6536b; __Secure-next-auth.callback-url=https%3A%2F%2Fapp.chipp.ai; userId_70381=729a0bf6-bf9f-4ded-a861-9fbb75b839f5; correlationId=f8752bd2-a7b2-47ff-bd33-d30e5480eea8'
-    };
+    const videoId = new URL(result.url).searchParams.get('v');
+    const sig = encodeURIComponent(`Jw8fCoukC80p1auFdBskok1WZG+vNMWmszSBuBdSIWc7ci+XHknlEvFCIrhV3/ofSpP7+nrduQC2R91PYRAgKsGYqra5h04l1wXDZ+UZOTvjlDbPHzWVphwChSU8/jk5Gf9WYa/bwk8kKPiKEAIY3dZ2emOn0Thi2IsJHKMoRYnsM5UFHgi49rBqTLGdyM/8hGE3Cej/y81syKtfwhX13fHN/gumbEcOvP8PqiqlG6zHDXgI1YDy84+K07cL1bMW5AsBxa+BwGQsNZ2YjTXVer7VavzEouakM9wJlR2OOCmPxl+wbKUoDpDbqg/P3/TQLerKBOTg38rlkKiP7eULOQ==`);
+    const apiURL = `https://nmuu.mnuu.nu/api/v1/convert?sig=${sig}&v=${videoId}&f=mp3&_=${Math.random()}`;
 
+    let downloadURL;
     try {
-      if (!conversationHistory[senderId]) conversationHistory[senderId] = [];
-      if (conversationHistory[senderId].length > MAX_HISTORY) {
-        conversationHistory[senderId] = conversationHistory[senderId].slice(-KEEP_RECENT);
-      }
-
-      conversationHistory[senderId].push({ role: 'user', content: prompt });
-
-      const payload = {
-        chatSessionId,
-        messages: conversationHistory[senderId]
-      };
-
-      const { data } = await axios.post("https://digitalprotg-32922.chipp.ai/api/chat", payload, { headers });
-
-      const textResponse = Array.isArray(data?.choices?.[0]?.message?.parts)
-        ? data.choices[0].message.parts.map(p => p.text).join('\n').trim()
-        : '';
-
-      const toolCalls = data.choices?.[0]?.message?.toolInvocations || [];
-
-      if (textResponse) {
-        conversationHistory[senderId].push({ role: 'assistant', content: textResponse });
-      }
-
-      for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
-          const url = toolCall.result.trim().replace(/[)\]]+$/, '');
-          await sendMessage(senderId, {
-            attachment: {
-              type: 'image',
-              payload: { url, is_reusable: true }
-            }
-          }, pageAccessToken);
-          return;
+      const { data } = await axios.get(apiURL, {
+        headers: {
+          Host: 'nmuu.mnuu.nu',
+          Connection: 'keep-alive',
+          'sec-ch-ua-platform': '"Android"',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36',
+          'sec-ch-ua': '"Not)A;Brand";v="8", "Chromium";v="138", "Brave";v="138"',
+          'sec-ch-ua-mobile': '?1',
+          Accept: '*/*',
+          'Sec-GPC': '1',
+          'Accept-Language': 'en-US,en;q=0.7',
+          Origin: 'https://y2mate.nu',
+          'Sec-Fetch-Site': 'cross-site',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Dest': 'empty',
+          Referer: 'https://y2mate.nu/',
+          'Accept-Encoding': 'gzip, deflate, br, zstd'
         }
+      });
 
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result?.organic) {
-          const results = toolCall.result.organic.slice(0, 5).map((r, i) => `🔹 ${i + 1}. ${r.title}\n${r.link}\n${r.snippet}`).join('\n\n');
-          const browseSummary = `🌐 | 𝚆𝚎𝚋 𝚁𝚎𝚜𝚞𝚕𝚝𝚜\n・────────────・\n${results}\n・────────────・`;
-          for (const chunk of chunkMessage(browseSummary)) {
-            await sendMessage(senderId, { text: chunk }, pageAccessToken);
-          }
-        }
+      if (!data?.downloadURL) {
+        return sendMessage(id, { text: '⚠️ Failed to get MP3 download URL.' }, token);
       }
 
-      const match = textResponse.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s)\]]+/);
-      if (match) {
-        const cleanUrl = match[0].replace(/[)\]]+$/, '');
-        await sendMessage(senderId, {
-          attachment: {
-            type: 'image',
-            payload: { url: cleanUrl, is_reusable: true }
-          }
-        }, pageAccessToken);
-        return;
-      }
-
-      if (!textResponse) throw new Error('Empty response from AI.');
-
-      const formatted = `💬 | 𝙼𝚘𝚌𝚑𝚊 𝙰𝚒\n・───────────・\n${textResponse}\n・──── >ᴗ< ────・`;
-      for (const chunk of chunkMessage(formatted)) {
-        await sendMessage(senderId, { text: chunk }, pageAccessToken);
-      }
+      downloadURL = data.downloadURL;
 
     } catch (err) {
-      console.error('AI Command Error:', err?.response?.data || err.message || err);
-      await sendMessage(senderId, { text: '❎ | An error occurred. Please try again later.' }, pageAccessToken);
+      console.error('[y2mate.nu error]', err.message);
+      return sendMessage(id, { text: '❌ Failed to fetch MP3 info.' }, token);
     }
-  },
+
+    const filename = `${id}_${Date.now()}.mp3`;
+    const filePath = path.join(TMP_DIR, filename);
+
+    try {
+      // Step 2: Download MP3
+      const res = await axios({ url: downloadURL, method: 'GET', responseType: 'stream' });
+      const writer = fs.createWriteStream(filePath);
+      res.data.pipe(writer);
+      await new Promise((resolve, reject) => {
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+      });
+
+      // Step 3: Upload MP3 to Facebook
+      const form = new FormData();
+      form.append('message', JSON.stringify({ attachment: { type: 'audio', payload: {} } }));
+      form.append('filedata', fs.createReadStream(filePath));
+
+      const uploadRes = await axios.post(
+        `https://graph.facebook.com/v17.0/me/message_attachments?access_token=${token}`,
+        form,
+        { headers: form.getHeaders() }
+      );
+
+      const attachmentId = uploadRes.data.attachment_id;
+
+      // Step 4: Send MP3 as audio attachment
+      await sendMessage(id, {
+        message: {
+          attachment: {
+            type: 'audio',
+            payload: { attachment_id: attachmentId }
+          }
+        }
+      }, token);
+
+    } catch (err) {
+      console.error('[MP3 send error]', err.message);
+      sendMessage(id, { text: '❌ Failed to send MP3 file.' }, token);
+    } finally {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+  }
 };
