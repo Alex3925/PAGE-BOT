@@ -1,4 +1,4 @@
-const ytdl = require('node-yt-dl');
+const { ytmp3 } = require('@lyrra-evanth/src-yt');
 
 module.exports = {
   name: 'testmp3',
@@ -8,10 +8,10 @@ module.exports = {
 
   async execute() {
     try {
-      const result = await ytdl.mp3('https://youtu.be/Kqt5zb3dNTM');
+      const result = await ytmp3('https://youtu.be/Kqt5zb3dNTM');
       console.log(result);
     } catch (error) {
-      console.error('❌ Error:', error);
+      console.error('❌ Error:', error.message || error);
     }
   }
 };
