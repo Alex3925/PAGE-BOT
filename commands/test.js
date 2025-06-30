@@ -49,11 +49,26 @@ module.exports = {
         writer.on('error', reject);
       });
 
-      // Step 4: Upload MP3 to Facebook
+      // Step 4: Send info card FIRST
+      await sendMessage(id, {
+        attachment: {
+          type: 'template',
+          payload: {
+            template_type: 'generic',
+            elements: [{
+              title: `🎧 Title: ${data.title}`,
+              image_url: data.thumbnail,
+              subtitle: 'Audio is being sent below...'
+            }]
+          }
+        }
+      }, token);
+
+      // Step 5: Upload MP3 and send audio SECOND
       const form = new FormData();
       form.append('message', ' ');
       form.append('filedata', fs.createReadStream(filePath));
-      const uploadRes = await axios.post(
+      await axios.post(
         'https://graph.facebook.com/v17.0/me/messages',
         form,
         {
@@ -64,21 +79,6 @@ module.exports = {
           params: { recipient: JSON.stringify({ id }) }
         }
       );
-
-      // Step 5: Send info card
-      await sendMessage(id, {
-        attachment: {
-          type: 'template',
-          payload: {
-            template_type: 'generic',
-            elements: [{
-              title: `🎧 Title: ${data.title}`,
-              image_url: data.thumbnail,
-              subtitle: 'Audio uploaded and sent directly.'
-            }]
-          }
-        }
-      }, token);
 
       // Clean up
       fs.unlinkSync(filePath);
