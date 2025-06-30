@@ -91,7 +91,6 @@ module.exports = {
         conversationHistory[senderId].push({ role: 'assistant', content: textResponse });
       }
 
-      // Handle generateImage tool
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'generateImage' && toolCall.state === 'result' && toolCall.result) {
           const url = toolCall.result.trim().replace(/[)\]]+$/, '');
@@ -103,34 +102,16 @@ module.exports = {
           }, pageAccessToken);
           return;
         }
-      }
 
-      // Handle browseWeb tool
-      for (const toolCall of toolCalls) {
-        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
-          const summary = toolCall.result?.text?.trim();
-          if (summary) {
-            const browseReply = `📰 | Web Summary:\n\n${summary}`;
-            for (const chunk of chunkMessage(browseReply)) {
-              await sendMessage(senderId, { text: chunk }, pageAccessToken);
-            }
-          } else {
-            const result = toolCall.result?.organic || [];
-            if (result.length > 0) {
-              const altSummary = result
-                .slice(0, 5)
-                .map((item, i) => `📌 ${i + 1}. ${item.title}\n${item.link}`)
-                .join('\n\n');
-              const fallback = `📰 | Web Results:\n\n${altSummary}`;
-              for (const chunk of chunkMessage(fallback)) {
-                await sendMessage(senderId, { text: chunk }, pageAccessToken);
-              }
-            }
+        if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result' && toolCall.result?.organic) {
+          const results = toolCall.result.organic.slice(0, 5).map((r, i) => `🔹 ${i + 1}. ${r.title}\n${r.link}\n${r.snippet}`).join('\n\n');
+          const browseSummary = `🌐 | 𝚆𝚎𝚋 𝚁𝚎𝚜𝚞𝚕𝚝𝚜\n・────────────・\n${results}\n・────────────・`;
+          for (const chunk of chunkMessage(browseSummary)) {
+            await sendMessage(senderId, { text: chunk }, pageAccessToken);
           }
         }
       }
 
-      // If the response contains a chipp-generated image URL, send preview
       const match = textResponse.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s)\]]+/);
       if (match) {
         const cleanUrl = match[0].replace(/[)\]]+$/, '');
