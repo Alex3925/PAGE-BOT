@@ -1,23 +1,17 @@
-const ytdl = require("node-yt-dl");
-const { sendMessage } = require('../handles/sendMessage');
+const ytdl = require('node-yt-dl');
 
 module.exports = {
-  name: "mp3",
-  description: "Downloads MP3 from a YouTube link.",
-  usage: "-mp3 <YouTube URL>",
-  author: "yourname",
+  name: 'testmp3',
+  description: 'Downloads MP3 info from YouTube and logs it.',
+  usage: '-testmp3',
+  author: 'you',
 
-  async execute(message, args) {
-    const url = args[0];
-    if (!url) return sendMessage(message, "❌ Please provide a YouTube URL.");
-
+  async execute() {
     try {
-      const result = await ytdl.mp3(url);
-      // Convert the entire result object to a readable JSON string
-      const resultText = "✅ MP3 Result:\n\n" + JSON.stringify(result, null, 2);
-      return sendMessage(message, resultText);
+      const result = await ytdl.mp3('https://youtu.be/OqEc_169ywY');
+      console.log(result);
     } catch (error) {
-      return sendMessage(message, `❌ Failed to retrieve MP3.\n\nError: ${error.message}`);
+      console.error('❌ Error:', error);
     }
   }
 };
