@@ -2,8 +2,8 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const ytsr = require('@distube/ytsr');
-const { sendMessage } = require('../handles/sendMessage');
 const FormData = require('form-data');
+const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
   name: 'test',
@@ -35,9 +35,13 @@ module.exports = {
       const mp3 = mp3List.find(x => x.quality === 320) || mp3List[0];
       const mp3Url = `https://clickapi.net/dl?token=${mp3.token}`;
 
-      // Step 3: Download MP3
-      const filePath = path.join(__dirname, '../temp/audio.mp3');
+      // Step 3: Ensure temp folder and download MP3
+      const tempDir = path.join(__dirname, '../temp');
+      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir);
+
+      const filePath = path.join(tempDir, 'audio.mp3');
       const writer = fs.createWriteStream(filePath);
+
       const response = await axios.get(mp3Url, { responseType: 'stream' });
       await new Promise((resolve, reject) => {
         response.data.pipe(writer);
@@ -50,7 +54,7 @@ module.exports = {
       form.append('message', ' ');
       form.append('filedata', fs.createReadStream(filePath));
       const uploadRes = await axios.post(
-        `https://graph.facebook.com/v23.0/me/messages`,
+        'https://graph.facebook.com/v17.0/me/messages',
         form,
         {
           headers: {
@@ -61,7 +65,7 @@ module.exports = {
         }
       );
 
-      // Step 5: Send info card (optional)
+      // Step 5: Send info card
       await sendMessage(id, {
         attachment: {
           type: 'template',
