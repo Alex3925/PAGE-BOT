@@ -29,7 +29,7 @@ module.exports = {
       return sendMessage(id, { text: '❌ Failed to convert audio.' }, token);
     }
 
-    if (!mp3.status || !mp3.download) {
+    if (!mp3.status || !mp3.download?.url) {
       return sendMessage(id, { text: `❌ Error: ${mp3.result || 'Unknown error occurred.'}` }, token);
     }
 
@@ -50,7 +50,7 @@ module.exports = {
 
     // Send MP3 URL as text
     await sendMessage(id, {
-      text: `🔗 MP3 Download:\n${mp3.download}`
+      text: `🔗 MP3 Download:\n${mp3.download.url}`
     }, token);
   }
 };
