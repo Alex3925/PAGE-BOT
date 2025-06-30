@@ -98,10 +98,7 @@ module.exports = {
           await sendMessage(senderId, {
             attachment: {
               type: 'image',
-              payload: {
-                url,
-                is_reusable: true
-              }
+              payload: { url, is_reusable: true }
             }
           }, pageAccessToken);
           return;
@@ -111,32 +108,36 @@ module.exports = {
       // Handle browseWeb tool
       for (const toolCall of toolCalls) {
         if (toolCall.toolName === 'browseWeb' && toolCall.state === 'result') {
-          const result = toolCall.result?.organic || [];
-          if (result.length > 0) {
-            const summary = result
-              .slice(0, 5)
-              .map((item, i) => `📌 ${i + 1}. ${item.title}\n${item.link}`)
-              .join('\n\n');
-            const browseReply = `📰 | Web Results:\n\n${summary}`;
+          const summary = toolCall.result?.text?.trim();
+          if (summary) {
+            const browseReply = `📰 | Web Summary:\n\n${summary}`;
             for (const chunk of chunkMessage(browseReply)) {
               await sendMessage(senderId, { text: chunk }, pageAccessToken);
+            }
+          } else {
+            const result = toolCall.result?.organic || [];
+            if (result.length > 0) {
+              const altSummary = result
+                .slice(0, 5)
+                .map((item, i) => `📌 ${i + 1}. ${item.title}\n${item.link}`)
+                .join('\n\n');
+              const fallback = `📰 | Web Results:\n\n${altSummary}`;
+              for (const chunk of chunkMessage(fallback)) {
+                await sendMessage(senderId, { text: chunk }, pageAccessToken);
+              }
             }
           }
         }
       }
 
       // If the response contains a chipp-generated image URL, send preview
-      const match = textResponse.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^
-\s)\]]+/);
+      const match = textResponse.match(/https:\/\/storage\.googleapis\.com\/chipp-images\/[^\s)\]]+/);
       if (match) {
         const cleanUrl = match[0].replace(/[)\]]+$/, '');
         await sendMessage(senderId, {
           attachment: {
             type: 'image',
-            payload: {
-              url: cleanUrl,
-              is_reusable: true
-            }
+            payload: { url: cleanUrl, is_reusable: true }
           }
         }, pageAccessToken);
         return;
