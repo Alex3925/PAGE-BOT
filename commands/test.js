@@ -1,9 +1,9 @@
-const { search, ytdlv2 } = require('@lyrra-evanth/src-yt');
+const { search, ytmp3 } = require('@lyrra-evanth/src-yt');
 const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
-  name: 'test',
-  description: 'Searches for songs on YouTube and provides MP3/MP4 download links.',
+  name: 'ytmusic',
+  description: 'Searches for songs on YouTube and provides audio links.',
   usage: '-ytmusic <song name>',
   author: 'coffee',
 
@@ -22,45 +22,35 @@ module.exports = {
     const video = result.results[0];
     const url = video.url;
 
-    let media;
+    let mp3;
     try {
-      // Default quality fallback (128 for audio or 360 for video)
-      media = await ytdlv2(url); 
+      mp3 = await ytmp3(url, '128');
     } catch (err) {
-      return sendMessage(id, { text: '❌ Failed to download media.' }, token);
+      return sendMessage(id, { text: '❌ Failed to convert audio.' }, token);
     }
 
-    if (!media.status || !media.download) {
-      return sendMessage(id, { text: `❌ Error: ${media.result || 'Unknown error'}` }, token);
+    if (!mp3.status || !mp3.download) {
+      return sendMessage(id, { text: `❌ Error: ${mp3.result || 'Unknown error occurred.'}` }, token);
     }
 
-    const meta = media.metadata;
-
-    // Send preview card
+    // Send metadata preview
     await sendMessage(id, {
       attachment: {
         type: 'template',
         payload: {
           template_type: 'generic',
           elements: [{
-            title: `🎧 Title: ${meta.title}`,
-            image_url: meta.thumbnail,
-            subtitle: `Duration: ${meta.duration}`
+            title: `🎧 Title: ${mp3.metadata.title}`,
+            image_url: mp3.metadata.thumbnail,
+            subtitle: `Duration: ${mp3.metadata.duration}`
           }]
         }
       }
     }, token);
 
-    // Determine type by file extension
-    const ext = media.download.split('.').pop().toLowerCase();
-    const type = ext === 'mp3' ? 'audio' : 'video';
-
-    // Send media file
+    // Send MP3 URL as text
     await sendMessage(id, {
-      attachment: {
-        type,
-        payload: { url: media.download }
-      }
+      text: `🔗 MP3 Download:\n${mp3.download}`
     }, token);
   }
 };
