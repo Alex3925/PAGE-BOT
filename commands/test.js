@@ -3,35 +3,47 @@ const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
   name: 'spotify',
-  description: 'Search and list Spotify track links.',
+  description: 'Search and play a Spotify song.',
   usage: 'spotify [song name]',
   author: 'coffee',
 
   async execute(senderId, args, pageAccessToken) {
     if (!args.length) {
-      return sendMessage(senderId, { text: 'Please enter a song name to search on Spotify.' }, pageAccessToken);
+      return sendMessage(senderId, { text: 'Please provide a song name to search.' }, pageAccessToken);
     }
 
     try {
       const query = encodeURIComponent(args.join(' '));
       const { data } = await axios.get(`https://spotify-play-iota.vercel.app/spotify?query=${query}`);
 
-      if (!Array.isArray(data.trackURLs) || data.trackURLs.length === 0) {
-        return sendMessage(senderId, { text: 'No Spotify tracks found for that search.' }, pageAccessToken);
+      const firstTrack = data?.trackURLs?.[0];
+      if (!firstTrack) {
+        return sendMessage(senderId, { text: 'No track found for your query.' }, pageAccessToken);
       }
 
-      const list = data.trackURLs
-        .slice(0, 10)
-        .map((url, i) => `${i + 1}. ${url}`)
-        .join('\n');
+      // Use external service to convert Spotify URL to MP3 — replace this with actual logic
+      const convertUrl = `https://spotify-downloader-api.vercel.app/api/download?url=${encodeURIComponent(firstTrack)}`;
+      const { data: downloadData } = await axios.get(convertUrl);
+
+      const audioUrl = downloadData?.audio;
+      if (!audioUrl) {
+        return sendMessage(senderId, { text: 'Could not retrieve MP3 from Spotify link.' }, pageAccessToken);
+      }
 
       return sendMessage(senderId, {
-        text: `🎧 Spotify Results for "${args.join(' ')}":\n\n${list}`
+        attachment: {
+          type: 'audio',
+          payload: {
+            url: audioUrl,
+            is_reusable: true
+          }
+        }
       }, pageAccessToken);
+
     } catch (error) {
-      console.error('Spotify Search Error:', error.message || error);
+      console.error('Spotify Error:', error.message || error);
       return sendMessage(senderId, {
-        text: 'Sorry, an error occurred while searching Spotify.'
+        text: 'Sorry, there was an error processing your request.'
       }, pageAccessToken);
     }
   }
