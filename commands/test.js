@@ -3,42 +3,36 @@ const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
   name: 'spotify',
-  description: 'Search and play a Spotify song.',
+  description: 'Search and list Spotify track links.',
   usage: 'spotify [song name]',
   author: 'coffee',
 
   async execute(senderId, args, pageAccessToken) {
     if (!args.length) {
-      return sendMessage(senderId, { text: 'Please provide a song name.' }, pageAccessToken);
+      return sendMessage(senderId, { text: 'Please enter a song name to search on Spotify.' }, pageAccessToken);
     }
 
     try {
       const query = encodeURIComponent(args.join(' '));
-      const res = await axios.get(`https://spotify-play-iota.vercel.app/spotify?query=${query}`);
+      const { data } = await axios.get(`https://spotify-play-iota.vercel.app/spotify?query=${query}`);
 
-      const { title, url, thumbnail } = res.data || {};
-      if (!url) {
-        return sendMessage(senderId, { text: 'Sorry, no results found for that song.' }, pageAccessToken);
+      if (!Array.isArray(data.trackURLs) || data.trackURLs.length === 0) {
+        return sendMessage(senderId, { text: 'No Spotify tracks found for that search.' }, pageAccessToken);
       }
 
-      await sendMessage(senderId, {
-        text: `🎵 Now playing: ${title}`,
-        quick_replies: [],
-      }, pageAccessToken);
+      const list = data.trackURLs
+        .slice(0, 10)
+        .map((url, i) => `${i + 1}. ${url}`)
+        .join('\n');
 
-      await sendMessage(senderId, {
-        attachment: {
-          type: 'audio',
-          payload: {
-            url,
-            is_reusable: true
-          }
-        }
+      return sendMessage(senderId, {
+        text: `🎧 Spotify Results for "${args.join(' ')}":\n\n${list}`
       }, pageAccessToken);
-      
     } catch (error) {
-      console.error('Spotify Error:', error?.message);
-      sendMessage(senderId, { text: 'Sorry, there was an error fetching the song.' }, pageAccessToken);
+      console.error('Spotify Search Error:', error.message || error);
+      return sendMessage(senderId, {
+        text: 'Sorry, an error occurred while searching Spotify.'
+      }, pageAccessToken);
     }
   }
 };
