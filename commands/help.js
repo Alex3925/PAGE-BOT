@@ -3,7 +3,7 @@ const path = require('path');
 const { sendMessage } = require('../handles/sendMessage');
 
 const commandCategories = {
-  "📖 | 𝙴𝚍𝚞𝚌𝚊𝚝𝚒𝚘𝚗": ['blackbox', 'gemini', 'groq'],
+  "📖 | 𝙴𝚍𝚞𝚌𝚊𝚝𝚒𝚘𝚗": ['ai', 'blackbox', 'gemini', 'groq'],
   "🖼 | 𝙸𝚖𝚊𝚐𝚎": ['imagegen', 'pinterest', 'removebg', 'upscale'],
   "🎧 | 𝙼𝚞𝚜𝚒𝚌": ['lyrics', 'spotify', 'ytmusic'],
   "👥 | 𝙾𝚝𝚑𝚎𝚛𝚜": ['alldl', 'help', 'tempmail']
