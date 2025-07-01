@@ -3,48 +3,21 @@ const { sendMessage } = require('../handles/sendMessage');
 
 module.exports = {
   name: 'spotify',
-  description: 'Search and play a Spotify song.',
-  usage: 'spotify [song name]',
+  description: 'Play a song from Spotify',
+  usage: 'spotify <song name>',
   author: 'coffee',
 
-  async execute(senderId, args, pageAccessToken) {
-    if (!args.length) {
-      return sendMessage(senderId, { text: 'Please provide a song name to search.' }, pageAccessToken);
-    }
-
+  async execute(senderId, args, token) {
     try {
-      const query = encodeURIComponent(args.join(' '));
-      const { data } = await axios.get(`https://spotify-play-iota.vercel.app/spotify?query=${query}`);
-
-      const firstTrack = data?.trackURLs?.[0];
-      if (!firstTrack) {
-        return sendMessage(senderId, { text: 'No track found for your query.' }, pageAccessToken);
-      }
-
-      // Use external service to convert Spotify URL to MP3 — replace this with actual logic
-      const convertUrl = `https://spotify-downloader-api.vercel.app/api/download?url=${encodeURIComponent(firstTrack)}`;
-      const { data: downloadData } = await axios.get(convertUrl);
-
-      const audioUrl = downloadData?.audio;
-      if (!audioUrl) {
-        return sendMessage(senderId, { text: 'Could not retrieve MP3 from Spotify link.' }, pageAccessToken);
-      }
-
-      return sendMessage(senderId, {
-        attachment: {
-          type: 'audio',
-          payload: {
-            url: audioUrl,
-            is_reusable: true
-          }
-        }
-      }, pageAccessToken);
-
-    } catch (error) {
-      console.error('Spotify Error:', error.message || error);
-      return sendMessage(senderId, {
-        text: 'Sorry, there was an error processing your request.'
-      }, pageAccessToken);
+      const { data } = await axios.get('https://hiroshi-api.onrender.com/tiktok/spotify', {
+        params: { search: args.join(' ') }
+      });
+      const url = data?.[0]?.download;
+      sendMessage(senderId, url ? {
+        attachment: { type: 'audio', payload: { url, is_reusable: true } }
+      } : { text: '❌ No song found.' }, token);
+    } catch {
+      sendMessage(senderId, { text: '❌ Failed to fetch song.' }, token);
     }
   }
 };
